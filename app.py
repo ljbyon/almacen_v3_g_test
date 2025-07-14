@@ -12,48 +12,14 @@ import io
 import os
 from googleapiclient.discovery import build
 
+import time
 import logging
-import os
-from datetime import datetime
 
-# Setup logging
-def setup_logger():
-    """Setup logger for the application"""
-    # Create logs directory if it doesn't exist
-    logs_dir = os.path.join(os.getcwd(), 'logs')
-    os.makedirs(logs_dir, exist_ok=True)
-    
-    # Create logger
-    logger = logging.getLogger('dismac_reservas')
-    logger.setLevel(logging.INFO)
-    
-    # Create formatter
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    
-    # Create file handler (saves to file)
-    log_filename = f"reservas_{datetime.now().strftime('%Y%m%d')}.log"
-    log_filepath = os.path.join(logs_dir, log_filename)
-    file_handler = logging.FileHandler(log_filepath, encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-    
-    # Create console handler (prints to console)
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    
-    # Add handlers to logger (only if not already added)
-    if not logger.handlers:
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-    
-    return logger
-
-# Initialize logger
-logger = setup_logger()
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
-
 
 # ─────────────────────────────────────────────────────────────
 # 1. Configuration
@@ -179,25 +145,109 @@ def download_sheets_to_memory():
         st.error(f"Error descargando datos: {str(e)}")
         return None, None, None
 
-def save_booking_to_sheets(new_booking):
-    """Save new booking to Google Sheets with comprehensive verification and logging"""
+
+def log_booking_attempt(action, details, success=None, error=None):
+    """Centralized logging for booking operations - SERVER SIDE ONLY"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_message = f"[{timestamp}] {action}: {details}"
+    
+    if success is not None:
+        log_message += f" | Success: {success}"
+    if error:
+        log_message += f" | Error: {error}"
+    
+    # Log to console/server logs only - NOT visible to users
+    if success is False or error:
+        logger.error(log_message)
+    else:
+        logger.info(log_message)
+
+def verify_booking_saved(spreadsheet, booking_data, max_retries=3):
+    """Verify that booking was actually saved to Google Sheets"""
     try:
-        logger.info(f"🔄 Starting booking save process for {new_booking['Proveedor']}")
+        for attempt in range(max_retries):
+            log_booking_attempt("VERIFY_ATTEMPT", f"Attempt {attempt + 1}/{max_retries}")
+            
+            # Get fresh data from sheets
+            reservas_ws = spreadsheet.worksheet("proveedor_reservas")
+            all_data = reservas_ws.get_all_values()
+            
+            if len(all_data) <= 1:  # Only headers
+                log_booking_attempt("VERIFY_FAILED", "No data found in sheet")
+                continue
+            
+            # Check last few rows for our booking
+            rows_to_check = min(5, len(all_data) - 1)  # Check last 5 rows
+            for i in range(len(all_data) - rows_to_check, len(all_data)):
+                row = all_data[i]
+                if len(row) >= 5:  # Ensure row has enough columns
+                    # Check if this row matches our booking
+                    if (row[0] == booking_data['Fecha'] and 
+                        row[1] == booking_data['Hora'] and 
+                        row[2] == booking_data['Proveedor'] and 
+                        row[3] == str(booking_data['Numero_de_bultos']) and 
+                        row[4] == booking_data['Orden_de_compra']):
+                        
+                        log_booking_attempt("VERIFY_SUCCESS", f"Booking found in row {i + 1}")
+                        return True, f"Booking verified in row {i + 1}"
+            
+            # If not found, wait and retry
+            if attempt < max_retries - 1:
+                log_booking_attempt("VERIFY_RETRY", f"Booking not found, waiting {attempt + 1} seconds")
+                time.sleep(attempt + 1)  # Progressive delay
         
-        # Clear cache and get fresh data for final check
+        return False, "Booking not found after verification attempts"
+        
+    except Exception as e:
+        error_msg = f"Verification failed: {str(e)}"
+        log_booking_attempt("VERIFY_ERROR", "", error=error_msg)
+        return False, error_msg
+
+def get_sheet_row_count(worksheet):
+    """Get the current number of rows in the worksheet"""
+    try:
+        all_values = worksheet.get_all_values()
+        # Subtract 1 for header row to get actual data rows
+        data_rows = len(all_values) - 1 if all_values else 0
+        return max(0, data_rows)
+    except Exception as e:
+        # Log error server-side only, don't show to user
+        log_booking_attempt("ROW_COUNT_ERROR", "", error=f"Failed to get row count: {str(e)}")
+        return -1
+
+def save_booking_to_sheets_enhanced(new_booking):
+    """
+    Enhanced save function with row count and specific booking verification
+    
+    Error Codes for User Messages:
+    - Error código 1: Database connection failures (can't connect to Google Sheets, can't load data)
+    - Error código 2: API failures (Google Sheets API calls fail, general exceptions)
+    - Error código 3: Row count verification failures (row count doesn't increase as expected)
+    - Error código 4: Booking verification failures (can't find specific booking after saving)
+    """
+    booking_id = f"{new_booking['Proveedor']}_{new_booking['Fecha']}_{new_booking['Hora']}"
+    
+    try:
+        log_booking_attempt("SAVE_START", f"Booking ID: {booking_id}")
+        
+        # Step 1: Clear cache and get fresh data
+        log_booking_attempt("CACHE_CLEAR", "Clearing cached data")
         download_sheets_to_memory.clear()
         credentials_df, reservas_df, gestion_df = download_sheets_to_memory()
         
         if reservas_df is None:
-            logger.error("❌ Failed to load reservation data")
-            st.error("❌ **Problemas de conexión**: No se pudo cargar los datos de reservas. Por favor, inténtelo nuevamente en unos minutos.")
-            return False
+            error_msg = "Failed to load data from Google Sheets"
+            log_booking_attempt("DATA_LOAD_FAILED", booking_id, success=False, error=error_msg)
+            st.error("❌ Debido a errores de servidor, no se pudo concretar la reserva. Por favor intentar luego después de unos minutos (Error código 1)")
+            return False, error_msg
 
-        # 🔒 FINAL CHECK: Verify slot is still available
+        log_booking_attempt("DATA_LOADED", f"Loaded {len(reservas_df)} existing reservations")
+
+        # Step 2: Final availability check
         fecha_reserva = new_booking['Fecha']
         hora_reserva = new_booking['Hora']
         
-        logger.info(f"🔍 Checking slot availability: {fecha_reserva} at {hora_reserva}")
+        log_booking_attempt("AVAILABILITY_CHECK", f"Date: {fecha_reserva}, Time: {hora_reserva}")
         
         existing_booking = reservas_df[
             (reservas_df['Fecha'].astype(str).str.contains(fecha_reserva.split(' ')[0], na=False)) & 
@@ -205,170 +255,245 @@ def save_booking_to_sheets(new_booking):
         ]
         
         if not existing_booking.empty:
-            logger.warning(f"⚠️ Slot conflict detected for {fecha_reserva} at {hora_reserva}")
+            error_msg = "Slot already booked by another provider"
+            log_booking_attempt("SLOT_TAKEN", booking_id, success=False, error=error_msg)
             st.error("❌ Otro proveedor acaba de reservar este horario")
             download_sheets_to_memory.clear()
-            return False
-        
-        logger.info("✅ Slot confirmed available, proceeding with save")
-        
-        # Get Google Sheets connection
+            return False, error_msg
+
+        log_booking_attempt("SLOT_AVAILABLE", f"Slot confirmed available for {booking_id}")
+
+        # Step 3: Get Google Sheets connection
+        log_booking_attempt("SHEETS_CONNECT", "Establishing Google Sheets connection")
         gc = setup_google_sheets()
         if not gc:
-            logger.error("❌ Failed to establish Google Sheets connection")
-            st.error("❌ **Problemas de conexión**: No se pudo conectar con el sistema de reservas. Por favor, inténtelo nuevamente en unos minutos.")
-            return False
-        
+            error_msg = "Failed to connect to Google Sheets"
+            log_booking_attempt("SHEETS_CONNECTION_FAILED", booking_id, success=False, error=error_msg)
+            st.error("❌ Debido a errores de servidor, no se pudo concretar la reserva. Por favor intentar luego después de unos minutos (Error código 1)")
+            return False, error_msg
+
         spreadsheet = gc.open(st.secrets["GOOGLE_SHEET_NAME"])
         reservas_ws = spreadsheet.worksheet("proveedor_reservas")
-
-        # Get current row count before insertion
-        current_rows = len(reservas_ws.get_all_values())
-        logger.info(f"📊 Current sheet has {current_rows} rows before insertion")
         
-        # Prepare new row data - MAINTAIN EXACT FORMAT
+        log_booking_attempt("WORKSHEET_ACCESSED", "proveedor_reservas worksheet accessed")
+
+        # Step 4: Get initial row count BEFORE saving
+        initial_row_count = get_sheet_row_count(reservas_ws)
+        if initial_row_count == -1:
+            error_msg = "Failed to get initial row count"
+            log_booking_attempt("INITIAL_COUNT_FAILED", booking_id, success=False, error=error_msg)
+            st.error("❌ Debido a errores de servidor, no se pudo concretar la reserva. Por favor intentar luego después de unos minutos (Error código 2)")
+            return False, error_msg
+        
+        log_booking_attempt("INITIAL_ROW_COUNT", f"Rows before save: {initial_row_count}")
+
+        # Step 5: Prepare data for saving
         new_row_data = [
-            new_booking['Fecha'],           # A: Fecha
-            new_booking['Hora'],            # B: Hora
-            new_booking['Proveedor'],       # C: Proveedor
-            str(new_booking['Numero_de_bultos']),  # D: Numero_de_bultos
-            new_booking['Orden_de_compra']  # E: Orden_de_compra
+            new_booking['Fecha'],
+            new_booking['Hora'],
+            new_booking['Proveedor'],
+            str(new_booking['Numero_de_bultos']),
+            new_booking['Orden_de_compra']
         ]
         
-        logger.info(f"💾 Attempting to save booking data: {new_row_data}")
+        log_booking_attempt("DATA_PREPARED", f"Row data: {new_row_data}")
+
+        # Attempt to save with retry logic
+        max_save_attempts = 3
+        save_success = False
+        last_error = None
         
-        # Attempt to append the new booking with retry logic
-        max_retries = 3
-        for attempt in range(max_retries):
+        for attempt in range(max_save_attempts):
             try:
-                # Append the new booking
-                response = reservas_ws.append_row(new_row_data, value_input_option='RAW')
-                logger.info(f"📝 Append operation response: {response}")
+                log_booking_attempt("SAVE_ATTEMPT", f"Attempt {attempt + 1}/{max_save_attempts} for {booking_id}")
                 
-                # Small delay to ensure operation completes
-                time.sleep(1)
+                # Save to sheets
+                reservas_ws.append_row(new_row_data, value_input_option='RAW')
                 
-                # VERIFICATION: Check if the booking was actually saved
-                logger.info("🔍 Verifying booking was saved...")
+                log_booking_attempt("APPEND_SUCCESS", f"append_row() completed for {booking_id}")
                 
-                # Get updated row count
-                new_rows = len(reservas_ws.get_all_values())
-                logger.info(f"📊 Sheet now has {new_rows} rows after insertion")
+                # Wait a moment for Google Sheets to process
+                time.sleep(2)
                 
-                if new_rows <= current_rows:
-                    logger.error(f"❌ Row count didn't increase! Expected: {current_rows + 1}, Got: {new_rows}")
-                    if attempt < max_retries - 1:
-                        logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
-                        # Exponential backoff: 2^attempt seconds
-                        wait_time = 2 ** (attempt + 1)
-                        logger.info(f"⏱️ Waiting {wait_time} seconds before retry...")
+                # Step 6A: Check if row count increased
+                log_booking_attempt("ROW_COUNT_CHECK", f"Checking row count increase for {booking_id}")
+                final_row_count = get_sheet_row_count(reservas_ws)
+                
+                if final_row_count == -1:
+                    last_error = "Failed to get final row count"
+                    log_booking_attempt("FINAL_COUNT_FAILED", booking_id, error=last_error)
+                    if attempt < max_save_attempts - 1:
+                        wait_time = (attempt + 1) * 2
+                        log_booking_attempt("COUNT_CHECK_RETRY", f"Waiting {wait_time} seconds before retry")
                         time.sleep(wait_time)
-                        continue
-                    else:
-                        st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
-                        return False
-                
-                # Double-check: Try to find our specific booking
-                logger.info("🔍 Searching for our specific booking...")
-                
-                # Clear cache and get fresh data to verify
-                download_sheets_to_memory.clear()
-                time.sleep(1)  # Brief delay for cache clear
-                
-                _, verification_df, _ = download_sheets_to_memory()
-                
-                if verification_df is not None:
-                    # Look for our booking in the fresh data
-                    matching_bookings = verification_df[
-                        (verification_df['Fecha'].astype(str).str.contains(fecha_reserva.split(' ')[0], na=False)) & 
-                        (verification_df['Hora'].astype(str) == hora_reserva) &
-                        (verification_df['Proveedor'].astype(str) == new_booking['Proveedor']) &
-                        (verification_df['Orden_de_compra'].astype(str) == new_booking['Orden_de_compra'])
-                    ]
-                    
-                    if matching_bookings.empty:
-                        logger.error("❌ Booking not found in verification check!")
-                        if attempt < max_retries - 1:
-                            logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
-                            # Exponential backoff: 2^attempt seconds
-                            wait_time = 2 ** (attempt + 1)
-                            logger.info(f"⏱️ Waiting {wait_time} seconds before retry...")
-                            time.sleep(wait_time)
-                            continue
-                        else:
-                            st.error("❌ **Problemas de conexión**: No se pudo verificar que la reserva se guardó debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
-                            return False
-                    else:
-                        logger.info(f"✅ Booking verified! Found {len(matching_bookings)} matching record(s)")
-                        break
-                else:
-                    logger.warning("⚠️ Could not load verification data, but append succeeded")
-                    break
-                    
-            except Exception as e:
-                logger.error(f"❌ Attempt {attempt + 1} failed: {str(e)}")
-                if attempt < max_retries - 1:
-                    logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
-                    # Exponential backoff: 2^attempt seconds
-                    wait_time = 2 ** (attempt + 1)
-                    logger.info(f"⏱️ Waiting {wait_time} seconds before retry...")
-                    time.sleep(wait_time)
                     continue
+                
+                row_count_increased = final_row_count > initial_row_count
+                expected_count = initial_row_count + 1
+                
+                log_booking_attempt("ROW_COUNT_RESULT", 
+                    f"Initial: {initial_row_count}, Final: {final_row_count}, Expected: {expected_count}, Increased: {row_count_increased}")
+                
+                if not row_count_increased:
+                    last_error = f"ROW_COUNT_NO_INCREASE: Row count did not increase. Initial: {initial_row_count}, Final: {final_row_count}"
+                    log_booking_attempt("ROW_COUNT_NO_INCREASE", booking_id, error=last_error)
+                    if attempt < max_save_attempts - 1:
+                        wait_time = (attempt + 1) * 2
+                        log_booking_attempt("ROW_COUNT_RETRY", f"Waiting {wait_time} seconds before retry")
+                        time.sleep(wait_time)
+                    continue
+                
+                if final_row_count != expected_count:
+                    # Row count increased but not by exactly 1 - could indicate multiple saves or other issues
+                    warning_msg = f"Row count increased by {final_row_count - initial_row_count} instead of 1. Possible concurrent saves."
+                    log_booking_attempt("ROW_COUNT_UNEXPECTED", booking_id, error=warning_msg)
+                    # Continue to specific booking verification
+                
+                # Step 6B: Verify the specific booking was saved
+                log_booking_attempt("SPECIFIC_VERIFICATION_START", f"Verifying specific booking for {booking_id}")
+                verification_success, verification_message = verify_booking_saved(spreadsheet, new_booking)
+                
+                if verification_success:
+                    log_booking_attempt("SAVE_VERIFIED", 
+                        f"{booking_id} - Row count: {initial_row_count}→{final_row_count}, {verification_message}", 
+                        success=True)
+                    save_success = True
+                    break
                 else:
-                    st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
-                    return False
+                    last_error = f"BOOKING_VERIFICATION_FAILED: Row count increased ({initial_row_count}→{final_row_count}) but specific booking verification failed: {verification_message}"
+                    log_booking_attempt("SAVE_PARTIAL_FAILURE", f"{booking_id}", error=last_error)
+                    
+                    if attempt < max_save_attempts - 1:
+                        wait_time = (attempt + 1) * 2
+                        log_booking_attempt("SAVE_RETRY_WAIT", f"Waiting {wait_time} seconds before retry")
+                        time.sleep(wait_time)
+                
+            except Exception as save_error:
+                last_error = f"API_FAILURE: Save attempt {attempt + 1} failed: {str(save_error)}"
+                log_booking_attempt("SAVE_ATTEMPT_ERROR", f"{booking_id}", error=last_error)
+                
+                if attempt < max_save_attempts - 1:
+                    wait_time = (attempt + 1) * 2
+                    time.sleep(wait_time)
         
-        logger.info("✅ Booking save process completed successfully")
-        
-        # Clear cache after successful save
-        download_sheets_to_memory.clear()
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Critical error in save_booking_to_sheets: {str(e)}")
-        st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
-        return False
-
-
-# Add this diagnostic function to help debug issues
-def diagnostic_check_sheets():
-    """Diagnostic function to check Google Sheets connection and data"""
-    try:
-        logger.info("🔍 Running diagnostic check...")
-        
-        # Test connection
-        gc = setup_google_sheets()
-        if not gc:
-            logger.error("❌ Google Sheets connection failed")
-            return False
-        
-        # Test spreadsheet access
-        spreadsheet = gc.open(st.secrets["GOOGLE_SHEET_NAME"])
-        logger.info(f"✅ Connected to spreadsheet: {spreadsheet.title}")
-        
-        # Test worksheet access
-        reservas_ws = spreadsheet.worksheet("proveedor_reservas")
-        logger.info(f"✅ Connected to worksheet: {reservas_ws.title}")
-        
-        # Test data reading
-        all_values = reservas_ws.get_all_values()
-        logger.info(f"✅ Read {len(all_values)} rows from worksheet")
-        
-        # Test data writing (add a test row and immediately remove it)
-        test_row = ["TEST", "TEST", "TEST", "TEST", "TEST"]
-        reservas_ws.append_row(test_row)
-        logger.info("✅ Test write successful")
-        
-        # Remove test row
-        reservas_ws.delete_rows(len(all_values) + 1)
-        logger.info("✅ Test row cleanup successful")
-        
-        return True
+        if save_success:
+            # Clear cache after successful save
+            download_sheets_to_memory.clear()
+            log_booking_attempt("SAVE_COMPLETE", 
+                f"{booking_id} successfully saved and verified (rows: {initial_row_count}→{final_row_count})", 
+                success=True)
+            return True, f"Booking saved and verified successfully. Row count: {initial_row_count}→{final_row_count}"
+        else:
+            # Determine error code based on the type of failure
+            error_code = "2"  # Default to API failure
+            if "ROW_COUNT_NO_INCREASE" in last_error:
+                error_code = "3"  # Row count verification failure
+            elif "BOOKING_VERIFICATION_FAILED" in last_error:
+                error_code = "4"  # Booking verification failure
+            elif "API_FAILURE" in last_error:
+                error_code = "2"  # API failure
+            
+            error_msg = f"Failed to save after {max_save_attempts} attempts. Last error: {last_error}"
+            log_booking_attempt("SAVE_FAILED_FINAL", booking_id, success=False, error=error_msg)
+            
+            # Show user-friendly error message with appropriate error code
+            st.error(f"❌ Debido a errores de servidor, no se pudo concretar la reserva. Por favor intentar luego después de unos minutos (Error código {error_code})")
+            
+            return False, error_msg
         
     except Exception as e:
-        logger.error(f"❌ Diagnostic check failed: {str(e)}")
+        error_msg = f"Unexpected error in save_booking_to_sheets_enhanced: {str(e)}"
+        log_booking_attempt("SAVE_EXCEPTION", booking_id, success=False, error=error_msg)
+        
+        # Show user-friendly error message
+        st.error("❌ Debido a errores de servidor, no se pudo concretar la reserva. Por favor intentar luego después de unos minutos (Error código 2)")
+        
+        return False, error_msg
+
+def enhanced_confirmation_process(selected_date, selected_slot, numero_bultos, valid_orders, supplier_name, supplier_email, supplier_cc_emails):
+    """Enhanced confirmation process with proper error handling and logging"""
+    
+    log_booking_attempt("CONFIRMATION_START", f"User: {supplier_name}, Date: {selected_date}, Slot: {selected_slot}")
+    
+    # Final availability check
+    with st.spinner("Verificando disponibilidad final..."):
+        is_still_available, availability_message = check_slot_availability(selected_date, selected_slot, numero_bultos)
+    
+    if not is_still_available:
+        log_booking_attempt("FINAL_CHECK_FAILED", f"{supplier_name}", success=False, error=availability_message)
+        st.error(f"❌ {availability_message}")
         return False
+    
+    log_booking_attempt("FINAL_CHECK_PASSED", f"Slot still available for {supplier_name}")
+
+    # Prepare booking data
+    orden_compra_combined = ', '.join(valid_orders)
+    
+    if numero_bultos >= 5:
+        next_slot = get_next_slot(selected_slot)
+        combined_hora = f"{selected_slot}:00, {next_slot}:00"
+        duration_text = " (1 hora)"
+    else:
+        combined_hora = f"{selected_slot}:00"
+        duration_text = ""
+    
+    booking_to_save = {
+        'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
+        'Hora': combined_hora,
+        'Proveedor': supplier_name,
+        'Numero_de_bultos': numero_bultos,
+        'Orden_de_compra': orden_compra_combined
+    }
+    
+    log_booking_attempt("BOOKING_PREPARED", f"Data prepared for {supplier_name}: {booking_to_save}")
+
+    # Attempt to save booking
+    with st.spinner("Guardando reserva... (Esto puede tomar unos momentos)"):
+        save_success, save_message = save_booking_to_sheets_enhanced(booking_to_save)
+    
+    if not save_success:
+        log_booking_attempt("BOOKING_SAVE_FAILED", f"{supplier_name}", success=False, error=save_message)
+        
+        # User already saw the error message from save_booking_to_sheets_enhanced
+        st.error("❌ No se enviará email de confirmación debido al error en el guardado")
+        
+        # Clear selected slot so user can try again
+        if 'selected_slot' in st.session_state:
+            del st.session_state.selected_slot
+        
+        st.info("💡 Puede intentar seleccionar otro horario o el mismo horario nuevamente después de unos minutos")
+        
+        return False
+    
+    # Only send email if save was successful and verified
+    log_booking_attempt("BOOKING_SAVED", f"{supplier_name} - {save_message}", success=True)
+    st.success("✅ Reserva confirmada y verificada!")
+    
+    # Send email
+    if supplier_email:
+        log_booking_attempt("EMAIL_START", f"Sending to {supplier_email}")
+        
+        with st.spinner("Enviando confirmación por email..."):
+            email_sent, actual_cc_emails = send_booking_email(
+                supplier_email,
+                supplier_name,
+                booking_to_save,
+                supplier_cc_emails
+            )
+        
+        if email_sent:
+            log_booking_attempt("EMAIL_SUCCESS", f"Email sent to {supplier_email}, CC: {actual_cc_emails}", success=True)
+            st.success(f"📧 Email de confirmación enviado a: {supplier_email}")
+            if actual_cc_emails:
+                st.success(f"📧 CC enviado a: {', '.join(actual_cc_emails)}")
+        else:
+            log_booking_attempt("EMAIL_FAILED", f"Failed to send email to {supplier_email}", success=False)
+            st.warning("⚠️ Reserva guardada exitosamente pero error enviando email")
+    else:
+        log_booking_attempt("NO_EMAIL", f"No email configured for {supplier_name}")
+        st.warning("⚠️ No se encontró email para enviar confirmación")
+    
+    return True
 
 # ─────────────────────────────────────────────────────────────
 # 3. Email Functions - UNCHANGED
@@ -420,11 +545,11 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
     try:
         # Use provided CC emails or default
         if cc_emails is None or len(cc_emails) == 0:
-            cc_emails = [ "ljbyon@dismac.com.bo"]
+            cc_emails = ["marketplace@dismac.com.bo", "ljbyon@dismac.com.bo"]
         else:
             # Add default email to the CC list if not already present
             if "marketplace@dismac.com.bo" not in cc_emails:
-                cc_emails = cc_emails + [ "ljbyon@dismac.com.bo"]
+                cc_emails = cc_emails + ["marketplace@dismac.com.bo", "ljbyon@dismac.com.bo"]
         
         # Email content
         subject = "Confirmación de Reserva para Entrega de Mercadería"
@@ -748,8 +873,7 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 # ─────────────────────────────────────────────────────────────
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
-
-
+    
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):
         credentials_df, reservas_df, gestion_df = download_sheets_to_memory()
@@ -1017,6 +1141,9 @@ def main():
                                 st.rerun()
         
         # STEP 4: Confirmation - UPDATED FOR GOOGLE SHEETS
+
+
+        # STEP 4: Enhanced Confirmation
         if selected_slot or 'selected_slot' in st.session_state:
             if selected_slot:
                 st.session_state.selected_slot = selected_slot
@@ -1031,79 +1158,23 @@ def main():
             st.info(f"📦 Número de bultos: {numero_bultos}")
             st.info(f"📋 Órdenes de compra: {', '.join(valid_orders)}")
             
-            # REPLACE THIS ENTIRE CONFIRMATION BUTTON LOGIC:
+            # Confirm button
             if st.button("✅ Confirmar Reserva", use_container_width=True):
-                logger.info(f"🎯 Reservation confirmation started for {st.session_state.supplier_name}")
-                
-                with st.spinner("Verificando disponibilidad final..."):
-                    is_still_available, availability_message = check_slot_availability(
-                        selected_date, st.session_state.selected_slot, numero_bultos
-                    )
-                
-                if not is_still_available:
-                    logger.warning(f"⚠️ Slot no longer available: {availability_message}")
-                    st.error(f"❌ {availability_message}")
-                    # Clear the selected slot to force reselection
-                    if 'selected_slot' in st.session_state:
-                        del st.session_state.selected_slot
-                    st.rerun()
-                    return
-                
-                logger.info("✅ Final slot availability confirmed")
-                
-                # Join multiple orders with comma
-                orden_compra_combined = ', '.join(valid_orders)
-                
-                # Create booking - MAINTAIN EXACT FORMAT FOR GOOGLE SHEETS
-                if numero_bultos >= 5:
-                    # For 1-hour reservation, combine both slots in hora field
-                    next_slot = get_next_slot(st.session_state.selected_slot)
-                    combined_hora = f"{st.session_state.selected_slot}:00, {next_slot}:00"
-                else:
-                    # For 30-minute reservation, single slot
-                    combined_hora = f"{st.session_state.selected_slot}:00"
-                
-                booking_to_save = {
-                    'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
-                    'Hora': combined_hora,
-                    'Proveedor': st.session_state.supplier_name,
-                    'Numero_de_bultos': numero_bultos,
-                    'Orden_de_compra': orden_compra_combined
-                }
-                
-                logger.info(f"📋 Booking details prepared: {booking_to_save}")
-                
-                with st.spinner("Guardando reserva..."):
-                    success = save_booking_to_sheets(booking_to_save)
+                success = enhanced_confirmation_process(
+                    selected_date,
+                    st.session_state.selected_slot,
+                    numero_bultos,
+                    valid_orders,
+                    st.session_state.supplier_name,
+                    st.session_state.supplier_email,
+                    st.session_state.supplier_cc_emails
+                )
                 
                 if success:
-                    logger.info("✅ Booking saved successfully, proceeding with email")
-                    st.success("✅ Reserva confirmada y guardada!")
-                    
-                    # Send email ONLY after confirmed save
-                    if st.session_state.supplier_email:
-                        with st.spinner("Enviando confirmación por email..."):
-                            email_sent, actual_cc_emails = send_booking_email(
-                                st.session_state.supplier_email,
-                                st.session_state.supplier_name,
-                                booking_to_save,
-                                st.session_state.supplier_cc_emails
-                            )
-                        if email_sent:
-                            logger.info(f"📧 Email sent successfully to {st.session_state.supplier_email}")
-                            st.success(f"📧 Email de confirmación enviado a: {st.session_state.supplier_email}")
-                            if actual_cc_emails:
-                                st.success(f"📧 CC enviado a: {', '.join(actual_cc_emails)}")
-                        else:
-                            logger.error("❌ Email sending failed after successful booking save")
-                            st.warning("⚠️ Reserva guardada pero error enviando email")
-                    else:
-                        logger.warning("⚠️ No email address found for confirmation")
-                        st.warning("⚠️ No se encontró email para enviar confirmación")
-                    
                     st.balloons()
                     
                     # Clear session data and log off user
+                    log_booking_attempt("SESSION_CLEANUP", f"Clearing session for {st.session_state.supplier_name}")
                     st.session_state.orden_compra_list = ['']
                     if 'numero_bultos_input' in st.session_state:
                         del st.session_state.numero_bultos_input
@@ -1115,17 +1186,10 @@ def main():
                     if 'selected_slot' in st.session_state:
                         del st.session_state.selected_slot
                     
-                    logger.info("🔓 User session cleared after successful booking")
-                    
                     # Wait a moment then rerun
-                    import time
                     time.sleep(2)
                     st.rerun()
-                else:
-                    logger.error("❌ Booking save failed - no email will be sent")
-                    st.error("❌ Error al guardar reserva - no se envió email de confirmación")
 
-
-
+                    
 if __name__ == "__main__":
     main()
