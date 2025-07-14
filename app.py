@@ -11,9 +11,20 @@ from email import encoders
 import io
 import os
 from googleapiclient.discovery import build
+import logging
+import time
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
 
+if st.button("🔍 Test Google Sheets Connection"):
+    diagnostic_check_sheets()
+    
 # ─────────────────────────────────────────────────────────────
 # 1. Configuration
 # ─────────────────────────────────────────────────────────────
@@ -139,13 +150,16 @@ def download_sheets_to_memory():
         return None, None, None
 
 def save_booking_to_sheets(new_booking):
-    """Save new booking to Google Sheets - REPLACES SharePoint Excel save"""
+    """Save new booking to Google Sheets with comprehensive verification and logging"""
     try:
+        logger.info(f"🔄 Starting booking save process for {new_booking['Proveedor']}")
+        
         # Clear cache and get fresh data for final check
         download_sheets_to_memory.clear()
         credentials_df, reservas_df, gestion_df = download_sheets_to_memory()
         
         if reservas_df is None:
+            logger.error("❌ Failed to load reservation data")
             st.error("❌ No se pudo cargar los datos")
             return False
 
@@ -153,23 +167,33 @@ def save_booking_to_sheets(new_booking):
         fecha_reserva = new_booking['Fecha']
         hora_reserva = new_booking['Hora']
         
+        logger.info(f"🔍 Checking slot availability: {fecha_reserva} at {hora_reserva}")
+        
         existing_booking = reservas_df[
             (reservas_df['Fecha'].astype(str).str.contains(fecha_reserva.split(' ')[0], na=False)) & 
             (reservas_df['Hora'].astype(str) == hora_reserva)
         ]
         
         if not existing_booking.empty:
+            logger.warning(f"⚠️ Slot conflict detected for {fecha_reserva} at {hora_reserva}")
             st.error("❌ Otro proveedor acaba de reservar este horario")
             download_sheets_to_memory.clear()
             return False
         
+        logger.info("✅ Slot confirmed available, proceeding with save")
+        
         # Get Google Sheets connection
         gc = setup_google_sheets()
         if not gc:
+            logger.error("❌ Failed to establish Google Sheets connection")
             return False
         
         spreadsheet = gc.open(st.secrets["GOOGLE_SHEET_NAME"])
         reservas_ws = spreadsheet.worksheet("proveedor_reservas")
+        
+        # Get current row count before insertion
+        current_rows = len(reservas_ws.get_all_values())
+        logger.info(f"📊 Current sheet has {current_rows} rows before insertion")
         
         # Prepare new row data - MAINTAIN EXACT FORMAT
         new_row_data = [
@@ -180,8 +204,81 @@ def save_booking_to_sheets(new_booking):
             new_booking['Orden_de_compra']  # E: Orden_de_compra
         ]
         
-        # Append the new booking
-        reservas_ws.append_row(new_row_data, value_input_option='RAW')
+        logger.info(f"💾 Attempting to save booking data: {new_row_data}")
+        
+        # Attempt to append the new booking with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Append the new booking
+                response = reservas_ws.append_row(new_row_data, value_input_option='RAW')
+                logger.info(f"📝 Append operation response: {response}")
+                
+                # Small delay to ensure operation completes
+                time.sleep(1)
+                
+                # VERIFICATION: Check if the booking was actually saved
+                logger.info("🔍 Verifying booking was saved...")
+                
+                # Get updated row count
+                new_rows = len(reservas_ws.get_all_values())
+                logger.info(f"📊 Sheet now has {new_rows} rows after insertion")
+                
+                if new_rows <= current_rows:
+                    logger.error(f"❌ Row count didn't increase! Expected: {current_rows + 1}, Got: {new_rows}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
+                        time.sleep(2)
+                        continue
+                    else:
+                        st.error("❌ Error: La reserva no se guardó correctamente")
+                        return False
+                
+                # Double-check: Try to find our specific booking
+                logger.info("🔍 Searching for our specific booking...")
+                
+                # Clear cache and get fresh data to verify
+                download_sheets_to_memory.clear()
+                time.sleep(1)  # Brief delay for cache clear
+                
+                _, verification_df, _ = download_sheets_to_memory()
+                
+                if verification_df is not None:
+                    # Look for our booking in the fresh data
+                    matching_bookings = verification_df[
+                        (verification_df['Fecha'].astype(str).str.contains(fecha_reserva.split(' ')[0], na=False)) & 
+                        (verification_df['Hora'].astype(str) == hora_reserva) &
+                        (verification_df['Proveedor'].astype(str) == new_booking['Proveedor']) &
+                        (verification_df['Orden_de_compra'].astype(str) == new_booking['Orden_de_compra'])
+                    ]
+                    
+                    if matching_bookings.empty:
+                        logger.error("❌ Booking not found in verification check!")
+                        if attempt < max_retries - 1:
+                            logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
+                            time.sleep(2)
+                            continue
+                        else:
+                            st.error("❌ Error: No se pudo verificar que la reserva se guardó")
+                            return False
+                    else:
+                        logger.info(f"✅ Booking verified! Found {len(matching_bookings)} matching record(s)")
+                        break
+                else:
+                    logger.warning("⚠️ Could not load verification data, but append succeeded")
+                    break
+                    
+            except Exception as e:
+                logger.error(f"❌ Attempt {attempt + 1} failed: {str(e)}")
+                if attempt < max_retries - 1:
+                    logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
+                    time.sleep(2)
+                    continue
+                else:
+                    st.error(f"❌ Error guardando reserva después de {max_retries} intentos: {str(e)}")
+                    return False
+        
+        logger.info("✅ Booking save process completed successfully")
         
         # Clear cache after successful save
         download_sheets_to_memory.clear()
@@ -189,7 +286,47 @@ def save_booking_to_sheets(new_booking):
         return True
         
     except Exception as e:
-        st.error(f"❌ Error guardando reserva: {str(e)}")
+        logger.error(f"❌ Critical error in save_booking_to_sheets: {str(e)}")
+        st.error(f"❌ Error crítico guardando reserva: {str(e)}")
+        return False
+
+# Add this diagnostic function to help debug issues
+def diagnostic_check_sheets():
+    """Diagnostic function to check Google Sheets connection and data"""
+    try:
+        logger.info("🔍 Running diagnostic check...")
+        
+        # Test connection
+        gc = setup_google_sheets()
+        if not gc:
+            logger.error("❌ Google Sheets connection failed")
+            return False
+        
+        # Test spreadsheet access
+        spreadsheet = gc.open(st.secrets["GOOGLE_SHEET_NAME"])
+        logger.info(f"✅ Connected to spreadsheet: {spreadsheet.title}")
+        
+        # Test worksheet access
+        reservas_ws = spreadsheet.worksheet("proveedor_reservas")
+        logger.info(f"✅ Connected to worksheet: {reservas_ws.title}")
+        
+        # Test data reading
+        all_values = reservas_ws.get_all_values()
+        logger.info(f"✅ Read {len(all_values)} rows from worksheet")
+        
+        # Test data writing (add a test row and immediately remove it)
+        test_row = ["TEST", "TEST", "TEST", "TEST", "TEST"]
+        reservas_ws.append_row(test_row)
+        logger.info("✅ Test write successful")
+        
+        # Remove test row
+        reservas_ws.delete_rows(len(all_values) + 1)
+        logger.info("✅ Test row cleanup successful")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Diagnostic check failed: {str(e)}")
         return False
 
 # ─────────────────────────────────────────────────────────────
@@ -853,82 +990,115 @@ def main():
             st.info(f"📋 Órdenes de compra: {', '.join(valid_orders)}")
             
             # Confirm button
-            if st.button("✅ Confirmar Reserva", use_container_width=True):
-                with st.spinner("Verificando disponibilidad final..."):
-                    is_still_available, availability_message = check_slot_availability(selected_date, st.session_state.selected_slot, numero_bultos)
-                
-                if not is_still_available:
-                    st.error(f"❌ {availability_message}")
-                    # Clear the selected slot to force reselection
-                    if 'selected_slot' in st.session_state:
-                        del st.session_state.selected_slot
-                    st.rerun()
-                    return
-                
-                # Join multiple orders with comma
-                orden_compra_combined = ', '.join(valid_orders)
-                
-                # Create booking - MAINTAIN EXACT FORMAT FOR GOOGLE SHEETS
-                if numero_bultos >= 5:
-                    # For 1-hour reservation, combine both slots in hora field
-                    next_slot = get_next_slot(st.session_state.selected_slot)
-                    combined_hora = f"{st.session_state.selected_slot}:00, {next_slot}:00"
+# STEP 4: Confirmation - UPDATED FOR GOOGLE SHEETS
+if selected_slot or 'selected_slot' in st.session_state:
+    if selected_slot:
+        st.session_state.selected_slot = selected_slot
+    
+    st.markdown("---")
+    st.subheader("✅ Confirmar Reserva")
+    
+    # Show summary
+    duration_text = " (1 hora)" if numero_bultos >= 5 else ""
+    st.info(f"📅 Fecha: {selected_date}")
+    st.info(f"🕐 Horario: {st.session_state.selected_slot}{duration_text}")
+    st.info(f"📦 Número de bultos: {numero_bultos}")
+    st.info(f"📋 Órdenes de compra: {', '.join(valid_orders)}")
+    
+    # REPLACE THIS ENTIRE CONFIRMATION BUTTON LOGIC:
+    if st.button("✅ Confirmar Reserva", use_container_width=True):
+        logger.info(f"🎯 Reservation confirmation started for {st.session_state.supplier_name}")
+        
+        with st.spinner("Verificando disponibilidad final..."):
+            is_still_available, availability_message = check_slot_availability(
+                selected_date, st.session_state.selected_slot, numero_bultos
+            )
+        
+        if not is_still_available:
+            logger.warning(f"⚠️ Slot no longer available: {availability_message}")
+            st.error(f"❌ {availability_message}")
+            # Clear the selected slot to force reselection
+            if 'selected_slot' in st.session_state:
+                del st.session_state.selected_slot
+            st.rerun()
+            return
+        
+        logger.info("✅ Final slot availability confirmed")
+        
+        # Join multiple orders with comma
+        orden_compra_combined = ', '.join(valid_orders)
+        
+        # Create booking - MAINTAIN EXACT FORMAT FOR GOOGLE SHEETS
+        if numero_bultos >= 5:
+            # For 1-hour reservation, combine both slots in hora field
+            next_slot = get_next_slot(st.session_state.selected_slot)
+            combined_hora = f"{st.session_state.selected_slot}:00, {next_slot}:00"
+        else:
+            # For 30-minute reservation, single slot
+            combined_hora = f"{st.session_state.selected_slot}:00"
+        
+        booking_to_save = {
+            'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
+            'Hora': combined_hora,
+            'Proveedor': st.session_state.supplier_name,
+            'Numero_de_bultos': numero_bultos,
+            'Orden_de_compra': orden_compra_combined
+        }
+        
+        logger.info(f"📋 Booking details prepared: {booking_to_save}")
+        
+        with st.spinner("Guardando reserva..."):
+            success = save_booking_to_sheets(booking_to_save)
+        
+        if success:
+            logger.info("✅ Booking saved successfully, proceeding with email")
+            st.success("✅ Reserva confirmada y guardada!")
+            
+            # Send email ONLY after confirmed save
+            if st.session_state.supplier_email:
+                with st.spinner("Enviando confirmación por email..."):
+                    email_sent, actual_cc_emails = send_booking_email(
+                        st.session_state.supplier_email,
+                        st.session_state.supplier_name,
+                        booking_to_save,
+                        st.session_state.supplier_cc_emails
+                    )
+                if email_sent:
+                    logger.info(f"📧 Email sent successfully to {st.session_state.supplier_email}")
+                    st.success(f"📧 Email de confirmación enviado a: {st.session_state.supplier_email}")
+                    if actual_cc_emails:
+                        st.success(f"📧 CC enviado a: {', '.join(actual_cc_emails)}")
                 else:
-                    # For 30-minute reservation, single slot
-                    combined_hora = f"{st.session_state.selected_slot}:00"
-                
-                booking_to_save = {
-                    'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
-                    'Hora': combined_hora,
-                    'Proveedor': st.session_state.supplier_name,
-                    'Numero_de_bultos': numero_bultos,
-                    'Orden_de_compra': orden_compra_combined
-                }
-                
-                with st.spinner("Guardando reserva..."):
-                    success = save_booking_to_sheets(booking_to_save)
-                
-                if success:
-                    st.success("✅ Reserva confirmada!")
-                    
-                    # Send email if email is available
-                    if st.session_state.supplier_email:
-                        with st.spinner("Enviando confirmación por email..."):
-                            email_sent, actual_cc_emails = send_booking_email(
-                                st.session_state.supplier_email,
-                                st.session_state.supplier_name,
-                                booking_to_save,
-                                st.session_state.supplier_cc_emails
-                            )
-                        if email_sent:
-                            st.success(f"📧 Email de confirmación enviado a: {st.session_state.supplier_email}")
-                            if actual_cc_emails:
-                                st.success(f"📧 CC enviado a: {', '.join(actual_cc_emails)}")
-                        else:
-                            st.warning("⚠️ Reserva guardada pero error enviando email")
-                    else:
-                        st.warning("⚠️ No se encontró email para enviar confirmación")
-                    
-                    st.balloons()
-                    
-                    # Clear session data and log off user
-                    st.session_state.orden_compra_list = ['']
-                    if 'numero_bultos_input' in st.session_state:
-                        del st.session_state.numero_bultos_input
-                    st.info("Cerrando sesión automáticamente...")
-                    st.session_state.authenticated = False
-                    st.session_state.supplier_name = None
-                    st.session_state.supplier_email = None
-                    st.session_state.supplier_cc_emails = []
-                    if 'selected_slot' in st.session_state:
-                        del st.session_state.selected_slot
-                    
-                    # Wait a moment then rerun
-                    import time
-                    time.sleep(2)
-                    st.rerun()
-                else:
-                    st.error("❌ Error al guardar reserva")
+                    logger.error("❌ Email sending failed after successful booking save")
+                    st.warning("⚠️ Reserva guardada pero error enviando email")
+            else:
+                logger.warning("⚠️ No email address found for confirmation")
+                st.warning("⚠️ No se encontró email para enviar confirmación")
+            
+            st.balloons()
+            
+            # Clear session data and log off user
+            st.session_state.orden_compra_list = ['']
+            if 'numero_bultos_input' in st.session_state:
+                del st.session_state.numero_bultos_input
+            st.info("Cerrando sesión automáticamente...")
+            st.session_state.authenticated = False
+            st.session_state.supplier_name = None
+            st.session_state.supplier_email = None
+            st.session_state.supplier_cc_emails = []
+            if 'selected_slot' in st.session_state:
+                del st.session_state.selected_slot
+            
+            logger.info("🔓 User session cleared after successful booking")
+            
+            # Wait a moment then rerun
+            import time
+            time.sleep(2)
+            st.rerun()
+        else:
+            logger.error("❌ Booking save failed - no email will be sent")
+            st.error("❌ Error al guardar reserva - no se envió email de confirmación")
+
 
 if __name__ == "__main__":
     main()
