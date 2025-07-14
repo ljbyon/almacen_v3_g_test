@@ -742,14 +742,32 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 # ─────────────────────────────────────────────────────────────
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
-    # ADD DIAGNOSTIC BUTTON (OPTIONAL - for debugging)
-    if st.sidebar.button("🔍 Test Google Sheets Connection"):
-        with st.spinner("Testing connection..."):
-            success = diagnostic_check_sheets()
-        if success:
-            st.sidebar.success("✅ Google Sheets connection working!")
+
+    logger.info("🚀 Streamlit app started")
+    logger.info("🧪 Testing file logging in Streamlit")
+    
+    # Add a test button
+    if st.button("🧪 Test Logging"):
+        logger.info("🔘 Test button clicked!")
+        logger.warning("⚠️ This is a test warning")
+        logger.error("❌ This is a test error")
+        st.success("✅ Logging test completed - check logs folder!")
+
+    # Add debug info in sidebar
+    if st.sidebar.button("🔍 Debug Info"):
+        import glob
+        cwd = os.getcwd()
+        st.sidebar.write(f"Current directory: {cwd}")
+        
+        log_files = glob.glob("logs/*.log")
+        st.sidebar.write(f"Log files found: {len(log_files)}")
+        
+        if log_files:
+            st.sidebar.write("Log files:")
+            for f in log_files:
+                st.sidebar.write(f"  - {f}")
         else:
-            st.sidebar.error("❌ Google Sheets connection failed!")
+            st.sidebar.write("No log files found")
     
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):
