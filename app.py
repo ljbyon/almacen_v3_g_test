@@ -114,7 +114,55 @@ def simple_logging_test():
     
     return log_file
 
-logger, log_file_path = setup_simple_logging()
+# STEP 3: Replace your current logging setup with this simple version
+# ===================================================================
+
+import streamlit as st
+import logging
+import os
+from datetime import datetime
+
+# Simple logging setup that definitely works
+def setup_working_logging():
+    """Setup logging that definitely works"""
+    
+    # Create logs directory
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+    
+    # Create log file
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = f"logs/booking_{timestamp}.log"
+    
+    # Setup basic logging to file
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, mode='w', encoding='utf-8'),
+            logging.StreamHandler()
+        ],
+        force=True
+    )
+    
+    # Get logger
+    logger = logging.getLogger(__name__)
+    
+    # Test logging
+    logger.info(f"📝 Logging setup complete - file: {log_file}")
+    logger.info("🧪 Testing logging...")
+    
+    # Verify file was created
+    if os.path.exists(log_file):
+        file_size = os.path.getsize(log_file)
+        logger.info(f"✅ Log file verified: {log_file} (size: {file_size} bytes)")
+    else:
+        logger.error(f"❌ Log file not created: {log_file}")
+    
+    return logger, log_file
+
+# Use the working logging setup
+logger, log_file_path = setup_working_logging()
 
 
 
