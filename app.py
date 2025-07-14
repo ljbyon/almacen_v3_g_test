@@ -19,29 +19,37 @@ import time
 from datetime import datetime
 import os
 
-# Replace the logging setup with this:
-def setup_file_logging():
+# Simple logger - Streamlit will configure it based on config.toml
+logger = logging.getLogger(__name__)
+
+# Optional: Add file handler if you want logs saved to file
+def add_file_handler():
+    """Add file handler to save logs to file"""
+    
+    # Create logs directory
     if not os.path.exists("logs"):
         os.makedirs("logs")
-        print("📁 Logs folder ready")
     
+    # Create log file
     log_filename = f"logs/booking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_filename, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
+    # Add file handler
+    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
     
-    logger = logging.getLogger(__name__)
-    logger.info(f"📝 Logging to: {log_filename}")
+    # Use same format as Streamlit
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
     
-    return logger
+    # Add handler to logger
+    logger.addHandler(file_handler)
+    
+    logger.info(f"📝 File logging enabled: {log_filename}")
+    
+    return log_filename
 
-logger = setup_file_logging()
+# Enable file logging
+log_file = add_file_handler()
 
 
 
@@ -743,31 +751,25 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
-    logger.info("🚀 Streamlit app started")
-    logger.info("🧪 Testing file logging in Streamlit")
+    # Test logging
+    logger.info("🚀 App started")
     
-    # Add a test button
-    if st.button("🧪 Test Logging"):
-        logger.info("🔘 Test button clicked!")
-        logger.warning("⚠️ This is a test warning")
-        logger.error("❌ This is a test error")
-        st.success("✅ Logging test completed - check logs folder!")
-
-    # Add debug info in sidebar
-    if st.sidebar.button("🔍 Debug Info"):
-        import glob
-        cwd = os.getcwd()
-        st.sidebar.write(f"Current directory: {cwd}")
-        
-        log_files = glob.glob("logs/*.log")
-        st.sidebar.write(f"Log files found: {len(log_files)}")
-        
-        if log_files:
-            st.sidebar.write("Log files:")
-            for f in log_files:
-                st.sidebar.write(f"  - {f}")
+    # Test button
+    if st.sidebar.button("🧪 Test Logging"):
+        logger.info("🔘 Test button clicked")
+        logger.warning("⚠️ Test warning")
+        logger.error("❌ Test error")
+        st.sidebar.success("✅ Logging test completed")
+    
+    # Show log file content
+    if st.sidebar.button("📄 Show Log File"):
+        if os.path.exists(log_file):
+            with open(log_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                st.sidebar.text_area("Log Content", content, height=300)
         else:
-            st.sidebar.write("No log files found")
+            st.sidebar.error("Log file not found")
+            
     
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):

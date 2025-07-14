@@ -1,0 +1,16 @@
+[logger]
+# Level of logging: "error", "warning", "info", or "debug"
+level = "info"
+
+# String format for logging messages
+messageFormat = "%(asctime)s - %(levelname)s - %(message)s"
+
+# Optional: Set datetime format
+# datetimeFormat = "%Y-%m-%d %H:%M:%S"
+
+[global]
+# Show more detailed error messages
+showErrorDetails = true
+
+# Optional: Disable widget state duplication warning
+disableWidgetStateDuplicationWarning = false
