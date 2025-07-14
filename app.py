@@ -545,11 +545,11 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
     try:
         # Use provided CC emails or default
         if cc_emails is None or len(cc_emails) == 0:
-            cc_emails = ["marketplace@dismac.com.bo", "ljbyon@dismac.com.bo"]
+            cc_emails = [ "ljbyon@dismac.com.bo"]
         else:
             # Add default email to the CC list if not already present
             if "marketplace@dismac.com.bo" not in cc_emails:
-                cc_emails = cc_emails + ["marketplace@dismac.com.bo", "ljbyon@dismac.com.bo"]
+                cc_emails = cc_emails + [ "ljbyon@dismac.com.bo"]
         
         # Email content
         subject = "Confirmación de Reserva para Entrega de Mercadería"
