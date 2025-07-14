@@ -159,7 +159,7 @@ def save_booking_to_sheets(new_booking):
         
         if reservas_df is None:
             logger.error("❌ Failed to load reservation data")
-            st.error("❌ No se pudo cargar los datos")
+            st.error("❌ **Problemas de conexión**: No se pudo cargar los datos de reservas. Por favor, inténtelo nuevamente en unos minutos.")
             return False
 
         # 🔒 FINAL CHECK: Verify slot is still available
@@ -185,6 +185,7 @@ def save_booking_to_sheets(new_booking):
         gc = setup_google_sheets()
         if not gc:
             logger.error("❌ Failed to establish Google Sheets connection")
+            st.error("❌ **Problemas de conexión**: No se pudo conectar con el sistema de reservas. Por favor, inténtelo nuevamente en unos minutos.")
             return False
         
         spreadsheet = gc.open(st.secrets["GOOGLE_SHEET_NAME"])
@@ -227,10 +228,13 @@ def save_booking_to_sheets(new_booking):
                     logger.error(f"❌ Row count didn't increase! Expected: {current_rows + 1}, Got: {new_rows}")
                     if attempt < max_retries - 1:
                         logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
-                        time.sleep(2)
+                        # Exponential backoff: 2^attempt seconds
+                        wait_time = 2 ** (attempt + 1)
+                        logger.info(f"⏱️ Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
                         continue
                     else:
-                        st.error("❌ Error: La reserva no se guardó correctamente")
+                        st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
                         return False
                 
                 # Double-check: Try to find our specific booking
@@ -255,10 +259,13 @@ def save_booking_to_sheets(new_booking):
                         logger.error("❌ Booking not found in verification check!")
                         if attempt < max_retries - 1:
                             logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
-                            time.sleep(2)
+                            # Exponential backoff: 2^attempt seconds
+                            wait_time = 2 ** (attempt + 1)
+                            logger.info(f"⏱️ Waiting {wait_time} seconds before retry...")
+                            time.sleep(wait_time)
                             continue
                         else:
-                            st.error("❌ Error: No se pudo verificar que la reserva se guardó")
+                            st.error("❌ **Problemas de conexión**: No se pudo verificar que la reserva se guardó debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
                             return False
                     else:
                         logger.info(f"✅ Booking verified! Found {len(matching_bookings)} matching record(s)")
@@ -271,10 +278,13 @@ def save_booking_to_sheets(new_booking):
                 logger.error(f"❌ Attempt {attempt + 1} failed: {str(e)}")
                 if attempt < max_retries - 1:
                     logger.info(f"🔄 Retrying... (Attempt {attempt + 2}/{max_retries})")
-                    time.sleep(2)
+                    # Exponential backoff: 2^attempt seconds
+                    wait_time = 2 ** (attempt + 1)
+                    logger.info(f"⏱️ Waiting {wait_time} seconds before retry...")
+                    time.sleep(wait_time)
                     continue
                 else:
-                    st.error(f"❌ Error guardando reserva después de {max_retries} intentos: {str(e)}")
+                    st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
                     return False
         
         logger.info("✅ Booking save process completed successfully")
@@ -286,8 +296,9 @@ def save_booking_to_sheets(new_booking):
         
     except Exception as e:
         logger.error(f"❌ Critical error in save_booking_to_sheets: {str(e)}")
-        st.error(f"❌ Error crítico guardando reserva: {str(e)}")
+        st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
         return False
+        
 
 # Add this diagnostic function to help debug issues
 def diagnostic_check_sheets():
@@ -706,9 +717,14 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 # ─────────────────────────────────────────────────────────────
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
-
-    if st.button("🔍 Test Google Sheets Connection"):
-        diagnostic_check_sheets()
+    # ADD DIAGNOSTIC BUTTON (OPTIONAL - for debugging)
+    if st.sidebar.button("🔍 Test Google Sheets Connection"):
+        with st.spinner("Testing connection..."):
+            success = diagnostic_check_sheets()
+        if success:
+            st.sidebar.success("✅ Google Sheets connection working!")
+        else:
+            st.sidebar.error("❌ Google Sheets connection failed!")
     
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):
