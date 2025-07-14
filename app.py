@@ -12,46 +12,47 @@ import io
 import os
 from googleapiclient.discovery import build
 
+import logging
+import os
+from datetime import datetime
 
-
-st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
-
-# ADD LOG VIEWER TO YOUR APP (for accessing logs later)
-# ===================================================
-
-def view_logs():
-    """View saved logs"""
-    
+# Setup logging
+def setup_logger():
+    """Setup logger for the application"""
+    # Create logs directory if it doesn't exist
     logs_dir = os.path.join(os.getcwd(), 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
     
-    if not os.path.exists(logs_dir):
-        return "No logs directory found"
+    # Create logger
+    logger = logging.getLogger('dismac_reservas')
+    logger.setLevel(logging.INFO)
     
-    # Get all log files
-    log_files = [f for f in os.listdir(logs_dir) if f.endswith('.log')]
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
-    if not log_files:
-        return "No log files found"
+    # Create file handler (saves to file)
+    log_filename = f"reservas_{datetime.now().strftime('%Y%m%d')}.log"
+    log_filepath = os.path.join(logs_dir, log_filename)
+    file_handler = logging.FileHandler(log_filepath, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
     
-    # Sort by date (newest first)
-    log_files.sort(reverse=True)
+    # Create console handler (prints to console)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
     
-    return log_files, logs_dir
+    # Add handlers to logger (only if not already added)
+    if not logger.handlers:
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+    
+    return logger
 
-def read_log_file(log_file_path, num_lines=50):
-    """Read last N lines from log file"""
-    
-    try:
-        with open(log_file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            # Return last N lines
-            return lines[-num_lines:] if len(lines) > num_lines else lines
-    except Exception as e:
-        return [f"Error reading log file: {e}"]
-
+# Initialize logger
+logger = setup_logger()
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
-
 
 
 # ─────────────────────────────────────────────────────────────
