@@ -12,38 +12,43 @@ import io
 import os
 from googleapiclient.discovery import build
 
-def setup_workspace_logging():
-    """Force logs to save in workspace directory"""
+
+
+import streamlit as st
+import logging
+from datetime import datetime
+import os
+import shutil
+
+def setup_permission_safe_logging():
+    """Create logs where we have permission, then copy to workspace"""
     
-    # FORCE workspace directory path
-    workspace_dir = "/workspaces/almacen_v3_g_test"
-    logs_dir = os.path.join(workspace_dir, 'logs')
+    # Use current working directory (where we have permissions)
+    current_dir = os.getcwd()
+    logs_dir = os.path.join(current_dir, 'logs')
     
-    # Create logs directory in workspace
+    # Create logs directory where we have permissions
     os.makedirs(logs_dir, exist_ok=True)
     
-    # Create daily log file in workspace
+    # Create daily log file
     today = datetime.now().strftime("%Y%m%d")
     log_file = os.path.join(logs_dir, f'booking_app_{today}.log')
     
-    # Debug: Print where we're trying to save
-    print(f"🔍 Trying to save logs to: {log_file}")
-    print(f"🔍 Current working directory: {os.getcwd()}")
-    print(f"🔍 Workspace directory exists: {os.path.exists(workspace_dir)}")
-    print(f"🔍 Logs directory exists: {os.path.exists(logs_dir)}")
+    print(f"🔍 App running from: {current_dir}")
+    print(f"🔍 Creating logs at: {log_file}")
     
-    # Clear ALL existing loggers and handlers
+    # Clear existing handlers
     logging.getLogger().handlers = []
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
     
-    # Create completely new logger
-    logger = logging.getLogger('workspace_booking')
+    # Create logger
+    logger = logging.getLogger('booking_app')
     logger.setLevel(logging.INFO)
     logger.handlers = []
     logger.propagate = False
     
-    # ONLY file handler - forced to workspace
+    # File handler
     try:
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(logging.INFO)
@@ -52,9 +57,11 @@ def setup_workspace_logging():
         logger.addHandler(file_handler)
         
         # Test log
-        logger.info("📝 Workspace logging started")
+        logger.info("📝 Permission-safe logging started")
+        logger.info(f"📁 Logs directory: {logs_dir}")
+        logger.info(f"📄 Log file: {log_file}")
         
-        # Force flush to ensure it's written
+        # Force flush
         file_handler.flush()
         
         # Verify file was created
@@ -64,22 +71,91 @@ def setup_workspace_logging():
         else:
             print(f"❌ Log file not created: {log_file}")
         
-        return logger, log_file
+        return logger, log_file, logs_dir
         
     except Exception as e:
-        print(f"❌ Failed to create workspace logger: {e}")
-        # Fallback to current directory
-        fallback_file = f"booking_app_{today}.log"
-        file_handler = logging.FileHandler(fallback_file, encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        logger.info("📝 Fallback logging started")
-        return logger, fallback_file
+        print(f"❌ Failed to create logger: {e}")
+        return None, None, None
 
-# REPLACE your current logging setup with this
-logger, log_file_path = setup_workspace_logging()
+# Setup logging
+logger, log_file_path, logs_directory = setup_permission_safe_logging()
+
+def copy_logs_to_workspace():
+    """Try to copy logs to workspace for easy access"""
+    
+    if not logs_directory:
+        return False, "No logs directory found"
+    
+    try:
+        # Try different workspace paths
+        possible_workspace_paths = [
+            "/workspaces/almacen_v3_g_test",
+            os.path.expanduser("~/almacen_v3_g_test"),
+            "/tmp/workspace_logs"
+        ]
+        
+        for workspace_path in possible_workspace_paths:
+            try:
+                if os.path.exists(os.path.dirname(workspace_path)) or workspace_path.startswith("/tmp"):
+                    # Create destination
+                    dest_logs = os.path.join(workspace_path, "logs")
+                    os.makedirs(dest_logs, exist_ok=True)
+                    
+                    # Copy all log files
+                    copied_files = []
+                    for file in os.listdir(logs_directory):
+                        if file.endswith('.log'):
+                            src = os.path.join(logs_directory, file)
+                            dst = os.path.join(dest_logs, file)
+                            shutil.copy2(src, dst)
+                            copied_files.append(file)
+                    
+                    if copied_files:
+                        return True, f"Copied {len(copied_files)} files to {dest_logs}"
+                
+            except Exception as e:
+                continue
+        
+        return False, "Could not find accessible workspace path"
+        
+    except Exception as e:
+        return False, f"Copy failed: {e}"
+
+def create_log_symlink():
+    """Try to create a symlink to logs directory"""
+    
+    if not logs_directory:
+        return False, "No logs directory found"
+    
+    try:
+        # Try to create symlink in accessible locations
+        possible_links = [
+            "/tmp/logs_link",
+            os.path.expanduser("~/logs_link"),
+            "./logs_link"
+        ]
+        
+        for link_path in possible_links:
+            try:
+                # Remove existing link if it exists
+                if os.path.exists(link_path):
+                    os.remove(link_path)
+                
+                # Create symlink
+                os.symlink(logs_directory, link_path)
+                
+                return True, f"Symlink created: {link_path} -> {logs_directory}"
+                
+            except Exception as e:
+                continue
+        
+        return False, "Could not create symlink in any accessible location"
+        
+    except Exception as e:
+        return False, f"Symlink failed: {e}"
+
+
+
 
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
@@ -816,55 +892,65 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
-    # Debug info
-    with st.sidebar:
-        st.subheader("🔍 Debug Info")
-        
-        if st.button("📍 Show Paths"):
-            st.write(f"**Current working dir:** {os.getcwd()}")
-            st.write(f"**Log file path:** {log_file_path}")
-            st.write(f"**File exists:** {os.path.exists(log_file_path)}")
-            
-            # Check workspace
-            workspace_logs = "/workspaces/almacen_v3_g_test/logs"
-            st.write(f"**Workspace logs dir:** {workspace_logs}")
-            st.write(f"**Workspace logs exists:** {os.path.exists(workspace_logs)}")
-            
-            if os.path.exists(workspace_logs):
-                files = os.listdir(workspace_logs)
-                st.write(f"**Files in workspace logs:** {files}")
-        
-        if st.button("✍️ Test Direct Write"):
-            success = direct_log_to_workspace("🖱️ Button click test", "INFO")
-            if success:
-                st.success("Direct write successful!")
-            else:
-                st.error("Direct write failed!")
-        
-        if st.button("🔍 Check Files"):
-            workspace_logs = "/workspaces/almacen_v3_g_test/logs"
-            if os.path.exists(workspace_logs):
-                files = [f for f in os.listdir(workspace_logs) if f.endswith('.log')]
-                
-                if files:
-                    st.write("**Found log files:**")
-                    for file in files:
-                        file_path = os.path.join(workspace_logs, file)
-                        file_size = os.path.getsize(file_path)
-                        st.write(f"  - {file} ({file_size} bytes)")
-                        
-                        # Show content
-                        with open(file_path, 'r') as f:
-                            content = f.read()
-                            st.text_area(f"Content of {file}", content, height=200)
-                else:
-                    st.write("No log files found in workspace")
-            else:
-                st.error("Workspace logs directory not found")
-    
-    # Test logging
-    logger.info("🚀 App started with workspace logging")
 
+    
+    # Log management in sidebar
+    with st.sidebar:
+        st.subheader("📄 Log Management")
+        
+        # Show current log info
+        if st.button("📍 Show Log Info"):
+            st.write(f"**App directory:** {os.getcwd()}")
+            if log_file_path:
+                st.write(f"**Log file:** {log_file_path}")
+                st.write(f"**File exists:** {os.path.exists(log_file_path)}")
+                if os.path.exists(log_file_path):
+                    file_size = os.path.getsize(log_file_path)
+                    st.write(f"**File size:** {file_size} bytes")
+            else:
+                st.write("**No log file created**")
+        
+        # Copy logs to accessible location
+        if st.button("📋 Copy Logs"):
+            success, message = copy_logs_to_workspace()
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+        
+        # Create symlink
+        if st.button("🔗 Create Log Link"):
+            success, message = create_log_symlink()
+            if success:
+                st.success(message)
+            else:
+                st.warning(message)
+        
+        # View logs
+        if st.button("🔍 View Logs"):
+            if log_file_path and os.path.exists(log_file_path):
+                try:
+                    with open(log_file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        st.text_area("Log Content", content, height=400)
+                except Exception as e:
+                    st.error(f"Error reading log: {e}")
+            else:
+                st.error("No log file found")
+        
+        # Test logging
+        if st.button("✍️ Test Logging"):
+            if logger:
+                logger.info("🧪 Test log entry")
+                logger.warning("⚠️ Test warning")
+                logger.error("❌ Test error")
+                st.success("Test logs written!")
+            else:
+                st.error("Logger not available")
+    
+    # Log app start
+    if logger:
+        logger.info("🚀 App started")
 
 
 
