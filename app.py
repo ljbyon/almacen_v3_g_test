@@ -222,16 +222,6 @@ def save_booking_to_sheets(new_booking):
         spreadsheet = gc.open(st.secrets["GOOGLE_SHEET_NAME"])
         reservas_ws = spreadsheet.worksheet("proveedor_reservas")
 
-        # 🧪 SIMPLE TEST: Add after reservas_ws = spreadsheet.worksheet("proveedor_reservas")
-
-        # Make get_all_values always return same count (simulates no row added)
-        original_get_all_values = reservas_ws.get_all_values
-        reservas_ws.get_all_values = lambda: [['Header'], ['Row1'], ['Row2']]  # Always 3 rows
-
-        # This will trigger: new_rows <= current_rows → retry logic
-        # Remove these 3 lines after testing
-
-
         # Get current row count before insertion
         current_rows = len(reservas_ws.get_all_values())
         logger.info(f"📊 Current sheet has {current_rows} rows before insertion")
