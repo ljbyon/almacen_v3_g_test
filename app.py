@@ -15,8 +15,43 @@ import logging
 import time
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Replace this in your code:
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+
+# With this:
+import logging
+import time
+from datetime import datetime
+import os
+
+def setup_simple_logging():
+    """Simple logging setup - saves logs in current directory"""
+    
+    # Create logs directory
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+    
+    # Log filename with timestamp
+    log_filename = f"logs/booking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    
+    # Setup logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename, encoding='utf-8'),
+            logging.StreamHandler()  # Still shows in terminal
+        ]
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"📝 Logging started - file: {log_filename}")
+    
+    return logger
+
+# Use this setup
+logger = setup_simple_logging()
 
 
 
@@ -298,7 +333,7 @@ def save_booking_to_sheets(new_booking):
         logger.error(f"❌ Critical error in save_booking_to_sheets: {str(e)}")
         st.error("❌ **Problemas de conexión**: No se pudo guardar la reserva debido a problemas de red. Por favor, inténtelo nuevamente en unos minutos.")
         return False
-        
+
 
 # Add this diagnostic function to help debug issues
 def diagnostic_check_sheets():
