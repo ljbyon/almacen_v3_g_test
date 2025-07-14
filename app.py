@@ -12,15 +12,8 @@ import io
 import os
 from googleapiclient.discovery import build
 
-
-
-import streamlit as st
-import logging
-from datetime import datetime
-import os
-
 def setup_file_only_logging():
-    """Simple file-only logging setup"""
+    """File-only logging - no console output"""
     
     # Create logs directory in your workspace
     logs_dir = os.path.join(os.getcwd(), 'logs')
@@ -29,26 +22,27 @@ def setup_file_only_logging():
     # Create logger
     logger = logging.getLogger('booking_app')
     logger.setLevel(logging.INFO)
-    logger.handlers = []  # Clear existing handlers
+    logger.handlers = []  # Clear ALL existing handlers
     
     # Create daily log file
     today = datetime.now().strftime("%Y%m%d")
     log_file = os.path.join(logs_dir, f'booking_app_{today}.log')
     
-    # File handler only (no console output)
+    # ONLY file handler - NO console handler
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
     
-    # Test log
-    logger.info("📝 Booking app logging started")
+    # Silent test log (won't show in console)
+    logger.info("📝 File-only logging started")
     
     return logger, log_file
 
-# Initialize logging
+# Use file-only logging
 logger, log_file_path = setup_file_only_logging()
+
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
 
@@ -784,48 +778,53 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
- 
-    # Log viewer in sidebar
     with st.sidebar:
         st.subheader("📄 Log Viewer")
         
-        if st.button("🔍 View Recent Logs"):
-            result = view_logs()
+        if st.button("🔍 View Logs"):
+            logs_dir = os.path.join(os.getcwd(), 'logs')
             
-            if isinstance(result, str):
-                st.error(result)
+            if os.path.exists(logs_dir):
+                log_files = [f for f in os.listdir(logs_dir) if f.endswith('.log')]
+                
+                if log_files:
+                    # Sort files (newest first)
+                    log_files.sort(reverse=True)
+                    
+                    # Select log file
+                    selected_file = st.selectbox("Select log file:", log_files)
+                    
+                    if selected_file:
+                        log_path = os.path.join(logs_dir, selected_file)
+                        
+                        # Read last 50 lines
+                        try:
+                            with open(log_path, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                                recent_lines = lines[-50:] if len(lines) > 50 else lines
+                                log_content = ''.join(recent_lines)
+                            
+                            st.text_area(
+                                f"Recent logs from {selected_file}:",
+                                log_content,
+                                height=400
+                            )
+                        except Exception as e:
+                            st.error(f"Error reading log: {e}")
+                else:
+                    st.info("No log files found")
             else:
-                log_files, logs_dir = result
-                
-                # Select log file
-                selected_file = st.selectbox("Select log file:", log_files)
-                
-                if selected_file:
-                    log_path = os.path.join(logs_dir, selected_file)
-                    
-                    # Number of lines to show
-                    num_lines = st.slider("Lines to show:", 10, 200, 50)
-                    
-                    # Read and display log
-                    log_lines = read_log_file(log_path, num_lines)
-                    log_content = ''.join(log_lines)
-                    
-                    st.text_area(
-                        f"Last {num_lines} lines from {selected_file}:",
-                        log_content,
-                        height=400
-                    )
+                st.error("Logs directory not found")
         
-        # Manual log entry for testing
-        if st.button("✍️ Test Log Entry"):
-            logger.info("🧪 Manual test log entry")
-            logger.warning("⚠️ Test warning message")
-            logger.error("❌ Test error message")
-            st.success("Test logs written!")
+        # Test logging (silent - no console output)
+        if st.button("✍️ Test Silent Logging"):
+            logger.info("🧪 Silent test log entry")
+            logger.warning("⚠️ Silent test warning")
+            logger.error("❌ Silent test error")
+            st.success("Silent logs written! Check log viewer.")
     
-    # Test logging on app start
-    logger.info("🚀 Streamlit app started")
-    
+    # Silent logging on app start
+    logger.info("🚀 App started silently")
 
 
 
