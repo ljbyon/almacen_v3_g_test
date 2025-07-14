@@ -12,45 +12,74 @@ import io
 import os
 from googleapiclient.discovery import build
 
-
-
-
-import logging
-from datetime import datetime
-
-# FILE-ONLY LOGGING SETUP
-# ========================
-
-def setup_file_only_logging():
-    """File-only logging - no console output"""
+def setup_workspace_logging():
+    """Force logs to save in workspace directory"""
     
-    # Create logs directory in your workspace
-    logs_dir = os.path.join(os.getcwd(), 'logs')
+    # FORCE workspace directory path
+    workspace_dir = "/workspaces/almacen_v3_g_test"
+    logs_dir = os.path.join(workspace_dir, 'logs')
+    
+    # Create logs directory in workspace
     os.makedirs(logs_dir, exist_ok=True)
     
-    # Create logger
-    logger = logging.getLogger('booking_app')
-    logger.setLevel(logging.INFO)
-    logger.handlers = []  # Clear ALL existing handlers
-    
-    # Create daily log file
+    # Create daily log file in workspace
     today = datetime.now().strftime("%Y%m%d")
     log_file = os.path.join(logs_dir, f'booking_app_{today}.log')
     
-    # ONLY file handler - NO console handler
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    # Debug: Print where we're trying to save
+    print(f"🔍 Trying to save logs to: {log_file}")
+    print(f"🔍 Current working directory: {os.getcwd()}")
+    print(f"🔍 Workspace directory exists: {os.path.exists(workspace_dir)}")
+    print(f"🔍 Logs directory exists: {os.path.exists(logs_dir)}")
     
-    # Silent test log (won't show in console)
-    logger.info("📝 File-only logging started")
+    # Clear ALL existing loggers and handlers
+    logging.getLogger().handlers = []
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
     
-    return logger, log_file
+    # Create completely new logger
+    logger = logging.getLogger('workspace_booking')
+    logger.setLevel(logging.INFO)
+    logger.handlers = []
+    logger.propagate = False
+    
+    # ONLY file handler - forced to workspace
+    try:
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        
+        # Test log
+        logger.info("📝 Workspace logging started")
+        
+        # Force flush to ensure it's written
+        file_handler.flush()
+        
+        # Verify file was created
+        if os.path.exists(log_file):
+            file_size = os.path.getsize(log_file)
+            print(f"✅ Log file created: {log_file} (size: {file_size} bytes)")
+        else:
+            print(f"❌ Log file not created: {log_file}")
+        
+        return logger, log_file
+        
+    except Exception as e:
+        print(f"❌ Failed to create workspace logger: {e}")
+        # Fallback to current directory
+        fallback_file = f"booking_app_{today}.log"
+        file_handler = logging.FileHandler(fallback_file, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.info("📝 Fallback logging started")
+        return logger, fallback_file
 
-# Initialize file-only logging
-logger, log_file_path = setup_file_only_logging()
+# REPLACE your current logging setup with this
+logger, log_file_path = setup_workspace_logging()
 
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
@@ -787,55 +816,54 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
-
+    # Debug info
     with st.sidebar:
-        st.subheader("📄 Log Viewer")
+        st.subheader("🔍 Debug Info")
         
-        if st.button("🔍 View Logs"):
-            logs_dir = os.path.join(os.getcwd(), 'logs')
+        if st.button("📍 Show Paths"):
+            st.write(f"**Current working dir:** {os.getcwd()}")
+            st.write(f"**Log file path:** {log_file_path}")
+            st.write(f"**File exists:** {os.path.exists(log_file_path)}")
             
-            if os.path.exists(logs_dir):
-                log_files = [f for f in os.listdir(logs_dir) if f.endswith('.log')]
-                
-                if log_files:
-                    # Sort files (newest first)
-                    log_files.sort(reverse=True)
-                    
-                    # Select log file
-                    selected_file = st.selectbox("Select log file:", log_files)
-                    
-                    if selected_file:
-                        log_path = os.path.join(logs_dir, selected_file)
-                        
-                        # Read last 50 lines
-                        try:
-                            with open(log_path, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()
-                                recent_lines = lines[-50:] if len(lines) > 50 else lines
-                                log_content = ''.join(recent_lines)
-                            
-                            st.text_area(
-                                f"Recent logs from {selected_file}:",
-                                log_content,
-                                height=400
-                            )
-                        except Exception as e:
-                            st.error(f"Error reading log: {e}")
-                else:
-                    st.info("No log files found")
-            else:
-                st.error("Logs directory not found")
+            # Check workspace
+            workspace_logs = "/workspaces/almacen_v3_g_test/logs"
+            st.write(f"**Workspace logs dir:** {workspace_logs}")
+            st.write(f"**Workspace logs exists:** {os.path.exists(workspace_logs)}")
+            
+            if os.path.exists(workspace_logs):
+                files = os.listdir(workspace_logs)
+                st.write(f"**Files in workspace logs:** {files}")
         
-        # Test logging (silent - no console output)
-        if st.button("✍️ Test Silent Logging"):
-            logger.info("🧪 Silent test log entry")
-            logger.warning("⚠️ Silent test warning")
-            logger.error("❌ Silent test error")
-            st.success("Silent logs written! Check log viewer.")
+        if st.button("✍️ Test Direct Write"):
+            success = direct_log_to_workspace("🖱️ Button click test", "INFO")
+            if success:
+                st.success("Direct write successful!")
+            else:
+                st.error("Direct write failed!")
+        
+        if st.button("🔍 Check Files"):
+            workspace_logs = "/workspaces/almacen_v3_g_test/logs"
+            if os.path.exists(workspace_logs):
+                files = [f for f in os.listdir(workspace_logs) if f.endswith('.log')]
+                
+                if files:
+                    st.write("**Found log files:**")
+                    for file in files:
+                        file_path = os.path.join(workspace_logs, file)
+                        file_size = os.path.getsize(file_path)
+                        st.write(f"  - {file} ({file_size} bytes)")
+                        
+                        # Show content
+                        with open(file_path, 'r') as f:
+                            content = f.read()
+                            st.text_area(f"Content of {file}", content, height=200)
+                else:
+                    st.write("No log files found in workspace")
+            else:
+                st.error("Workspace logs directory not found")
     
-    # Silent logging on app start
-    logger.info("🚀 App started silently")
-    
+    # Test logging
+    logger.info("🚀 App started with workspace logging")
 
 
 
