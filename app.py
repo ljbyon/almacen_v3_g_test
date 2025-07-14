@@ -13,148 +13,159 @@ import os
 from googleapiclient.discovery import build
 
 
-
 import streamlit as st
-import logging
+import streamlit.logger
 from datetime import datetime
 import os
-import shutil
+import logging
 
-def setup_permission_safe_logging():
-    """Create logs where we have permission, then copy to workspace"""
+def setup_streamlit_native_logging():
+    """Use Streamlit's built-in logging system"""
     
-    # Use current working directory (where we have permissions)
-    current_dir = os.getcwd()
-    logs_dir = os.path.join(current_dir, 'logs')
+    # Get Streamlit's logger
+    logger = streamlit.logger.get_logger(__name__)
     
-    # Create logs directory where we have permissions
-    os.makedirs(logs_dir, exist_ok=True)
-    
-    # Create daily log file
-    today = datetime.now().strftime("%Y%m%d")
-    log_file = os.path.join(logs_dir, f'booking_app_{today}.log')
-    
-    print(f"🔍 App running from: {current_dir}")
-    print(f"🔍 Creating logs at: {log_file}")
-    
-    # Clear existing handlers
-    logging.getLogger().handlers = []
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-    
-    # Create logger
-    logger = logging.getLogger('booking_app')
-    logger.setLevel(logging.INFO)
-    logger.handlers = []
-    logger.propagate = False
-    
-    # File handler
+    # Also create a custom file handler using Streamlit's approach
     try:
+        # Create logs directory in a safe location
+        # Streamlit usually has write access to its own directories
+        import tempfile
+        
+        # Try to use Streamlit's temp directory or system temp
+        temp_dir = tempfile.gettempdir()
+        logs_dir = os.path.join(temp_dir, 'streamlit_booking_logs')
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Create daily log file
+        today = datetime.now().strftime("%Y%m%d")
+        log_file = os.path.join(logs_dir, f'booking_app_{today}.log')
+        
+        # Add file handler to Streamlit's logger
         file_handler = logging.FileHandler(log_file, encoding='utf-8')
         file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
+        
+        # Add to Streamlit's logger
         logger.addHandler(file_handler)
         
         # Test log
-        logger.info("📝 Permission-safe logging started")
+        logger.info("📝 Streamlit native logging started")
         logger.info(f"📁 Logs directory: {logs_dir}")
         logger.info(f"📄 Log file: {log_file}")
-        
-        # Force flush
-        file_handler.flush()
-        
-        # Verify file was created
-        if os.path.exists(log_file):
-            file_size = os.path.getsize(log_file)
-            print(f"✅ Log file created: {log_file} (size: {file_size} bytes)")
-        else:
-            print(f"❌ Log file not created: {log_file}")
         
         return logger, log_file, logs_dir
         
     except Exception as e:
-        print(f"❌ Failed to create logger: {e}")
-        return None, None, None
+        st.error(f"Failed to setup file logging: {e}")
+        # Return just the Streamlit logger without file handler
+        logger.info("📝 Streamlit console logging only")
+        return logger, None, None
 
-# Setup logging
-logger, log_file_path, logs_directory = setup_permission_safe_logging()
+# Setup Streamlit native logging
+logger, log_file_path, logs_directory = setup_streamlit_native_logging()
 
-def copy_logs_to_workspace():
-    """Try to copy logs to workspace for easy access"""
+# ALTERNATIVE: Pure Streamlit logger approach
+# ==========================================
+
+def setup_pure_streamlit_logging():
+    """Use pure Streamlit logging without custom file handlers"""
     
-    if not logs_directory:
-        return False, "No logs directory found"
+    # Get Streamlit's logger
+    logger = streamlit.logger.get_logger("booking_app")
     
-    try:
-        # Try different workspace paths
-        possible_workspace_paths = [
-            "/workspaces/almacen_v3_g_test",
-            os.path.expanduser("~/almacen_v3_g_test"),
-            "/tmp/workspace_logs"
-        ]
+    # Log to Streamlit's system
+    logger.info("📝 Pure Streamlit logging initialized")
+    
+    return logger
+
+# Use pure Streamlit logger (fallback)
+# streamlit_logger = setup_pure_streamlit_logging()
+
+# STREAMLIT SESSION STATE LOGGING
+# ===============================
+
+def log_to_session_state(message, level="INFO"):
+    """Log to Streamlit session state for easy viewing"""
+    
+    if 'app_logs' not in st.session_state:
+        st.session_state.app_logs = []
+    
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_entry = f"{timestamp} - {level} - {message}"
+    
+    # Add to session state (keep last 100 entries)
+    st.session_state.app_logs.append(log_entry)
+    if len(st.session_state.app_logs) > 100:
+        st.session_state.app_logs = st.session_state.app_logs[-100:]
+    
+    # Also log to Streamlit logger
+    if level == "INFO":
+        logger.info(message)
+    elif level == "WARNING":
+        logger.warning(message)
+    elif level == "ERROR":
+        logger.error(message)
+
+# HYBRID LOGGING APPROACH
+# =======================
+
+class BookingLogger:
+    """Hybrid logger using multiple Streamlit approaches"""
+    
+    def __init__(self):
+        self.streamlit_logger = streamlit.logger.get_logger("booking_app")
+        self.file_path = None
         
-        for workspace_path in possible_workspace_paths:
+        # Try to setup file logging
+        try:
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            logs_dir = os.path.join(temp_dir, 'booking_logs')
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            today = datetime.now().strftime("%Y%m%d")
+            self.file_path = os.path.join(logs_dir, f'booking_{today}.log')
+            
+            # Test write
+            with open(self.file_path, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()} - INFO - Hybrid logging initialized\n")
+            
+        except Exception as e:
+            self.file_path = None
+    
+    def info(self, message):
+        self.streamlit_logger.info(message)
+        log_to_session_state(message, "INFO")
+        if self.file_path:
             try:
-                if os.path.exists(os.path.dirname(workspace_path)) or workspace_path.startswith("/tmp"):
-                    # Create destination
-                    dest_logs = os.path.join(workspace_path, "logs")
-                    os.makedirs(dest_logs, exist_ok=True)
-                    
-                    # Copy all log files
-                    copied_files = []
-                    for file in os.listdir(logs_directory):
-                        if file.endswith('.log'):
-                            src = os.path.join(logs_directory, file)
-                            dst = os.path.join(dest_logs, file)
-                            shutil.copy2(src, dst)
-                            copied_files.append(file)
-                    
-                    if copied_files:
-                        return True, f"Copied {len(copied_files)} files to {dest_logs}"
-                
-            except Exception as e:
-                continue
-        
-        return False, "Could not find accessible workspace path"
-        
-    except Exception as e:
-        return False, f"Copy failed: {e}"
-
-def create_log_symlink():
-    """Try to create a symlink to logs directory"""
+                with open(self.file_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()} - INFO - {message}\n")
+            except:
+                pass
     
-    if not logs_directory:
-        return False, "No logs directory found"
-    
-    try:
-        # Try to create symlink in accessible locations
-        possible_links = [
-            "/tmp/logs_link",
-            os.path.expanduser("~/logs_link"),
-            "./logs_link"
-        ]
-        
-        for link_path in possible_links:
+    def warning(self, message):
+        self.streamlit_logger.warning(message)
+        log_to_session_state(message, "WARNING")
+        if self.file_path:
             try:
-                # Remove existing link if it exists
-                if os.path.exists(link_path):
-                    os.remove(link_path)
-                
-                # Create symlink
-                os.symlink(logs_directory, link_path)
-                
-                return True, f"Symlink created: {link_path} -> {logs_directory}"
-                
-            except Exception as e:
-                continue
-        
-        return False, "Could not create symlink in any accessible location"
-        
-    except Exception as e:
-        return False, f"Symlink failed: {e}"
+                with open(self.file_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()} - WARNING - {message}\n")
+            except:
+                pass
+    
+    def error(self, message):
+        self.streamlit_logger.error(message)
+        log_to_session_state(message, "ERROR")
+        if self.file_path:
+            try:
+                with open(self.file_path, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()} - ERROR - {message}\n")
+            except:
+                pass
 
-
+# Use hybrid logger
+booking_logger = BookingLogger()
 
 
 
@@ -892,67 +903,76 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
-
-    
-    # Log management in sidebar
+    # Streamlit logging management in sidebar
     with st.sidebar:
-        st.subheader("📄 Log Management")
+        st.subheader("📄 Streamlit Logging")
         
-        # Show current log info
-        if st.button("📍 Show Log Info"):
-            st.write(f"**App directory:** {os.getcwd()}")
+        # Show log paths
+        if st.button("📍 Show Streamlit Log Info"):
+            st.write("**Streamlit Logger Info:**")
+            st.write(f"Logger name: {logger.name}")
+            st.write(f"Logger level: {logger.level}")
+            st.write(f"Handlers: {len(logger.handlers)}")
+            
             if log_file_path:
                 st.write(f"**Log file:** {log_file_path}")
                 st.write(f"**File exists:** {os.path.exists(log_file_path)}")
                 if os.path.exists(log_file_path):
                     file_size = os.path.getsize(log_file_path)
                     st.write(f"**File size:** {file_size} bytes")
-            else:
-                st.write("**No log file created**")
+            
+            if logs_directory:
+                st.write(f"**Logs directory:** {logs_directory}")
+                if os.path.exists(logs_directory):
+                    files = os.listdir(logs_directory)
+                    st.write(f"**Files in directory:** {files}")
         
-        # Copy logs to accessible location
-        if st.button("📋 Copy Logs"):
-            success, message = copy_logs_to_workspace()
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
+        # Test Streamlit logging
+        if st.button("✍️ Test Streamlit Logging"):
+            logger.info("🧪 Streamlit logger test")
+            logger.warning("⚠️ Streamlit warning test")
+            logger.error("❌ Streamlit error test")
+            
+            # Also test hybrid logger
+            booking_logger.info("🔄 Hybrid logger test")
+            booking_logger.warning("⚠️ Hybrid warning test")
+            booking_logger.error("❌ Hybrid error test")
+            
+            st.success("Streamlit logging tests completed!")
         
-        # Create symlink
-        if st.button("🔗 Create Log Link"):
-            success, message = create_log_symlink()
-            if success:
-                st.success(message)
+        # View session state logs
+        if st.button("🔍 View Session Logs"):
+            if 'app_logs' in st.session_state and st.session_state.app_logs:
+                # Show last 20 logs
+                recent_logs = st.session_state.app_logs[-20:]
+                log_content = '\n'.join(recent_logs)
+                st.text_area("Recent Session Logs:", log_content, height=400)
             else:
-                st.warning(message)
+                st.info("No session logs found")
         
-        # View logs
-        if st.button("🔍 View Logs"):
-            if log_file_path and os.path.exists(log_file_path):
+        # View file logs if available
+        if st.button("📄 View File Logs") and log_file_path:
+            if os.path.exists(log_file_path):
                 try:
                     with open(log_file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
-                        st.text_area("Log Content", content, height=400)
+                        st.text_area("File Logs:", content, height=400)
                 except Exception as e:
-                    st.error(f"Error reading log: {e}")
+                    st.error(f"Error reading file: {e}")
             else:
-                st.error("No log file found")
+                st.error("Log file not found")
         
-        # Test logging
-        if st.button("✍️ Test Logging"):
-            if logger:
-                logger.info("🧪 Test log entry")
-                logger.warning("⚠️ Test warning")
-                logger.error("❌ Test error")
-                st.success("Test logs written!")
-            else:
-                st.error("Logger not available")
+        # Clear session logs
+        if st.button("🗑️ Clear Session Logs"):
+            st.session_state.app_logs = []
+            st.success("Session logs cleared!")
     
-    # Log app start
-    if logger:
-        logger.info("🚀 App started")
-
-
+    # Test all logging methods
+    logger.info("🚀 App started with Streamlit native logging")
+    booking_logger.info("🚀 App started with hybrid logging")
+    log_to_session_state("🚀 App started with session state logging")
+    
+    
 
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):
