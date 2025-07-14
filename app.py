@@ -16,155 +16,74 @@ from googleapiclient.discovery import build
 
 import streamlit as st
 import logging
-import os
 from datetime import datetime
+import os
 
-def debug_logging():
-    """Debug logging to see what's happening"""
+def setup_file_only_logging():
+    """Simple file-only logging setup"""
     
-    # Check current directory
-    cwd = os.getcwd()
-    print(f"Current working directory: {cwd}")
-    
-    # Check if logs directory exists
-    logs_dir = os.path.join(cwd, "logs")
-    print(f"Logs directory: {logs_dir}")
-    print(f"Logs directory exists: {os.path.exists(logs_dir)}")
-    
-    # List contents of logs directory
-    if os.path.exists(logs_dir):
-        contents = os.listdir(logs_dir)
-        print(f"Logs directory contents: {contents}")
-    
-    # Create test file directly
-    test_file = os.path.join(logs_dir, "test_direct.txt")
-    try:
-        with open(test_file, 'w') as f:
-            f.write("Direct file write test")
-        print(f"✅ Direct file write successful: {test_file}")
-        
-        # Check if file was created
-        if os.path.exists(test_file):
-            print(f"✅ Test file exists: {test_file}")
-            with open(test_file, 'r') as f:
-                content = f.read()
-                print(f"✅ Test file content: {content}")
-        else:
-            print(f"❌ Test file not found: {test_file}")
-            
-    except Exception as e:
-        print(f"❌ Direct file write failed: {e}")
-
-# STEP 2: Very simple logging test
-# ================================
-
-def simple_logging_test():
-    """Very simple logging test"""
-    
-    # Ensure logs directory exists
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
-        print("Created logs directory")
-    
-    # Create log file path
-    log_file = f"logs/simple_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    print(f"Will create log file: {log_file}")
+    # Create logs directory in your workspace
+    logs_dir = os.path.join(os.getcwd(), 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
     
     # Create logger
-    logger = logging.getLogger("simple_test")
+    logger = logging.getLogger('booking_app')
     logger.setLevel(logging.INFO)
+    logger.handlers = []  # Clear existing handlers
     
-    # Remove existing handlers
-    logger.handlers = []
+    # Create daily log file
+    today = datetime.now().strftime("%Y%m%d")
+    log_file = os.path.join(logs_dir, f'booking_app_{today}.log')
     
-    # Create file handler
-    file_handler = logging.FileHandler(log_file, mode='w')
+    # File handler only (no console output)
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setLevel(logging.INFO)
-    
-    # Add formatter
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
-    
-    # Add handler to logger
     logger.addHandler(file_handler)
     
-    # Test logging
-    logger.info("Test message 1")
-    logger.info("Test message 2")
-    logger.warning("Test warning")
-    logger.error("Test error")
-    
-    # Force flush
-    file_handler.flush()
-    
-    # Check if file was created
-    if os.path.exists(log_file):
-        file_size = os.path.getsize(log_file)
-        print(f"✅ Log file created: {log_file} (size: {file_size} bytes)")
-        
-        # Read file content
-        with open(log_file, 'r') as f:
-            content = f.read()
-            print(f"File content:\n{content}")
-    else:
-        print(f"❌ Log file not created: {log_file}")
-    
-    # Close handler
-    file_handler.close()
-    
-    return log_file
-
-# STEP 3: Replace your current logging setup with this simple version
-# ===================================================================
-
-import streamlit as st
-import logging
-import os
-from datetime import datetime
-
-# Simple logging setup that definitely works
-def setup_working_logging():
-    """Setup logging that definitely works"""
-    
-    # Create logs directory
-    if not os.path.exists("logs"):
-        os.makedirs("logs")
-    
-    # Create log file
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_file = f"logs/booking_{timestamp}.log"
-    
-    # Setup basic logging to file
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, mode='w', encoding='utf-8'),
-            logging.StreamHandler()
-        ],
-        force=True
-    )
-    
-    # Get logger
-    logger = logging.getLogger(__name__)
-    
-    # Test logging
-    logger.info(f"📝 Logging setup complete - file: {log_file}")
-    logger.info("🧪 Testing logging...")
-    
-    # Verify file was created
-    if os.path.exists(log_file):
-        file_size = os.path.getsize(log_file)
-        logger.info(f"✅ Log file verified: {log_file} (size: {file_size} bytes)")
-    else:
-        logger.error(f"❌ Log file not created: {log_file}")
+    # Test log
+    logger.info("📝 Booking app logging started")
     
     return logger, log_file
 
-# Use the working logging setup
-logger, log_file_path = setup_working_logging()
+# Initialize logging
+logger, log_file_path = setup_file_only_logging()
 
+st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
 
+# ADD LOG VIEWER TO YOUR APP (for accessing logs later)
+# ===================================================
+
+def view_logs():
+    """View saved logs"""
+    
+    logs_dir = os.path.join(os.getcwd(), 'logs')
+    
+    if not os.path.exists(logs_dir):
+        return "No logs directory found"
+    
+    # Get all log files
+    log_files = [f for f in os.listdir(logs_dir) if f.endswith('.log')]
+    
+    if not log_files:
+        return "No log files found"
+    
+    # Sort by date (newest first)
+    log_files.sort(reverse=True)
+    
+    return log_files, logs_dir
+
+def read_log_file(log_file_path, num_lines=50):
+    """Read last N lines from log file"""
+    
+    try:
+        with open(log_file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            # Return last N lines
+            return lines[-num_lines:] if len(lines) > num_lines else lines
+    except Exception as e:
+        return [f"Error reading log file: {e}"]
 
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
@@ -865,31 +784,53 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
-   # Test button
-    if st.sidebar.button("✍️ Write Test Log"):
-        logger.info("🖱️ Test log entry from button click")
-        logger.warning("⚠️ Test warning")
-        logger.error("❌ Test error")
-        st.sidebar.success("Test logs written!")
-    
-    # Check file button
-    if st.sidebar.button("📄 Check Log File"):
-        st.sidebar.write(f"Log file: {log_file_path}")
-        st.sidebar.write(f"File exists: {os.path.exists(log_file_path)}")
+ 
+    # Log viewer in sidebar
+    with st.sidebar:
+        st.subheader("📄 Log Viewer")
         
-        if os.path.exists(log_file_path):
-            file_size = os.path.getsize(log_file_path)
-            st.sidebar.write(f"File size: {file_size} bytes")
+        if st.button("🔍 View Recent Logs"):
+            result = view_logs()
             
-            with open(log_file_path, 'r') as f:
-                content = f.read()
-                st.sidebar.text_area("Log Content", content, height=300)
-        else:
-            st.sidebar.error("Log file not found!")
+            if isinstance(result, str):
+                st.error(result)
+            else:
+                log_files, logs_dir = result
+                
+                # Select log file
+                selected_file = st.selectbox("Select log file:", log_files)
+                
+                if selected_file:
+                    log_path = os.path.join(logs_dir, selected_file)
+                    
+                    # Number of lines to show
+                    num_lines = st.slider("Lines to show:", 10, 200, 50)
+                    
+                    # Read and display log
+                    log_lines = read_log_file(log_path, num_lines)
+                    log_content = ''.join(log_lines)
+                    
+                    st.text_area(
+                        f"Last {num_lines} lines from {selected_file}:",
+                        log_content,
+                        height=400
+                    )
+        
+        # Manual log entry for testing
+        if st.button("✍️ Test Log Entry"):
+            logger.info("🧪 Manual test log entry")
+            logger.warning("⚠️ Test warning message")
+            logger.error("❌ Test error message")
+            st.success("Test logs written!")
     
     # Test logging on app start
-    logger.info("🚀 App started")
+    logger.info("🚀 Streamlit app started")
     
+
+
+
+
+
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):
         credentials_df, reservas_df, gestion_df = download_sheets_to_memory()
