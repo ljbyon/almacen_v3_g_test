@@ -24,7 +24,7 @@ st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layou
 
 if st.button("🔍 Test Google Sheets Connection"):
     diagnostic_check_sheets()
-    
+
 # ─────────────────────────────────────────────────────────────
 # 1. Configuration
 # ─────────────────────────────────────────────────────────────
@@ -989,115 +989,100 @@ def main():
             st.info(f"📦 Número de bultos: {numero_bultos}")
             st.info(f"📋 Órdenes de compra: {', '.join(valid_orders)}")
             
-            # Confirm button
-# STEP 4: Confirmation - UPDATED FOR GOOGLE SHEETS
-if selected_slot or 'selected_slot' in st.session_state:
-    if selected_slot:
-        st.session_state.selected_slot = selected_slot
-    
-    st.markdown("---")
-    st.subheader("✅ Confirmar Reserva")
-    
-    # Show summary
-    duration_text = " (1 hora)" if numero_bultos >= 5 else ""
-    st.info(f"📅 Fecha: {selected_date}")
-    st.info(f"🕐 Horario: {st.session_state.selected_slot}{duration_text}")
-    st.info(f"📦 Número de bultos: {numero_bultos}")
-    st.info(f"📋 Órdenes de compra: {', '.join(valid_orders)}")
-    
-    # REPLACE THIS ENTIRE CONFIRMATION BUTTON LOGIC:
-    if st.button("✅ Confirmar Reserva", use_container_width=True):
-        logger.info(f"🎯 Reservation confirmation started for {st.session_state.supplier_name}")
-        
-        with st.spinner("Verificando disponibilidad final..."):
-            is_still_available, availability_message = check_slot_availability(
-                selected_date, st.session_state.selected_slot, numero_bultos
-            )
-        
-        if not is_still_available:
-            logger.warning(f"⚠️ Slot no longer available: {availability_message}")
-            st.error(f"❌ {availability_message}")
-            # Clear the selected slot to force reselection
-            if 'selected_slot' in st.session_state:
-                del st.session_state.selected_slot
-            st.rerun()
-            return
-        
-        logger.info("✅ Final slot availability confirmed")
-        
-        # Join multiple orders with comma
-        orden_compra_combined = ', '.join(valid_orders)
-        
-        # Create booking - MAINTAIN EXACT FORMAT FOR GOOGLE SHEETS
-        if numero_bultos >= 5:
-            # For 1-hour reservation, combine both slots in hora field
-            next_slot = get_next_slot(st.session_state.selected_slot)
-            combined_hora = f"{st.session_state.selected_slot}:00, {next_slot}:00"
-        else:
-            # For 30-minute reservation, single slot
-            combined_hora = f"{st.session_state.selected_slot}:00"
-        
-        booking_to_save = {
-            'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
-            'Hora': combined_hora,
-            'Proveedor': st.session_state.supplier_name,
-            'Numero_de_bultos': numero_bultos,
-            'Orden_de_compra': orden_compra_combined
-        }
-        
-        logger.info(f"📋 Booking details prepared: {booking_to_save}")
-        
-        with st.spinner("Guardando reserva..."):
-            success = save_booking_to_sheets(booking_to_save)
-        
-        if success:
-            logger.info("✅ Booking saved successfully, proceeding with email")
-            st.success("✅ Reserva confirmada y guardada!")
-            
-            # Send email ONLY after confirmed save
-            if st.session_state.supplier_email:
-                with st.spinner("Enviando confirmación por email..."):
-                    email_sent, actual_cc_emails = send_booking_email(
-                        st.session_state.supplier_email,
-                        st.session_state.supplier_name,
-                        booking_to_save,
-                        st.session_state.supplier_cc_emails
+            # REPLACE THIS ENTIRE CONFIRMATION BUTTON LOGIC:
+            if st.button("✅ Confirmar Reserva", use_container_width=True):
+                logger.info(f"🎯 Reservation confirmation started for {st.session_state.supplier_name}")
+                
+                with st.spinner("Verificando disponibilidad final..."):
+                    is_still_available, availability_message = check_slot_availability(
+                        selected_date, st.session_state.selected_slot, numero_bultos
                     )
-                if email_sent:
-                    logger.info(f"📧 Email sent successfully to {st.session_state.supplier_email}")
-                    st.success(f"📧 Email de confirmación enviado a: {st.session_state.supplier_email}")
-                    if actual_cc_emails:
-                        st.success(f"📧 CC enviado a: {', '.join(actual_cc_emails)}")
+                
+                if not is_still_available:
+                    logger.warning(f"⚠️ Slot no longer available: {availability_message}")
+                    st.error(f"❌ {availability_message}")
+                    # Clear the selected slot to force reselection
+                    if 'selected_slot' in st.session_state:
+                        del st.session_state.selected_slot
+                    st.rerun()
+                    return
+                
+                logger.info("✅ Final slot availability confirmed")
+                
+                # Join multiple orders with comma
+                orden_compra_combined = ', '.join(valid_orders)
+                
+                # Create booking - MAINTAIN EXACT FORMAT FOR GOOGLE SHEETS
+                if numero_bultos >= 5:
+                    # For 1-hour reservation, combine both slots in hora field
+                    next_slot = get_next_slot(st.session_state.selected_slot)
+                    combined_hora = f"{st.session_state.selected_slot}:00, {next_slot}:00"
                 else:
-                    logger.error("❌ Email sending failed after successful booking save")
-                    st.warning("⚠️ Reserva guardada pero error enviando email")
-            else:
-                logger.warning("⚠️ No email address found for confirmation")
-                st.warning("⚠️ No se encontró email para enviar confirmación")
-            
-            st.balloons()
-            
-            # Clear session data and log off user
-            st.session_state.orden_compra_list = ['']
-            if 'numero_bultos_input' in st.session_state:
-                del st.session_state.numero_bultos_input
-            st.info("Cerrando sesión automáticamente...")
-            st.session_state.authenticated = False
-            st.session_state.supplier_name = None
-            st.session_state.supplier_email = None
-            st.session_state.supplier_cc_emails = []
-            if 'selected_slot' in st.session_state:
-                del st.session_state.selected_slot
-            
-            logger.info("🔓 User session cleared after successful booking")
-            
-            # Wait a moment then rerun
-            import time
-            time.sleep(2)
-            st.rerun()
-        else:
-            logger.error("❌ Booking save failed - no email will be sent")
-            st.error("❌ Error al guardar reserva - no se envió email de confirmación")
+                    # For 30-minute reservation, single slot
+                    combined_hora = f"{st.session_state.selected_slot}:00"
+                
+                booking_to_save = {
+                    'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
+                    'Hora': combined_hora,
+                    'Proveedor': st.session_state.supplier_name,
+                    'Numero_de_bultos': numero_bultos,
+                    'Orden_de_compra': orden_compra_combined
+                }
+                
+                logger.info(f"📋 Booking details prepared: {booking_to_save}")
+                
+                with st.spinner("Guardando reserva..."):
+                    success = save_booking_to_sheets(booking_to_save)
+                
+                if success:
+                    logger.info("✅ Booking saved successfully, proceeding with email")
+                    st.success("✅ Reserva confirmada y guardada!")
+                    
+                    # Send email ONLY after confirmed save
+                    if st.session_state.supplier_email:
+                        with st.spinner("Enviando confirmación por email..."):
+                            email_sent, actual_cc_emails = send_booking_email(
+                                st.session_state.supplier_email,
+                                st.session_state.supplier_name,
+                                booking_to_save,
+                                st.session_state.supplier_cc_emails
+                            )
+                        if email_sent:
+                            logger.info(f"📧 Email sent successfully to {st.session_state.supplier_email}")
+                            st.success(f"📧 Email de confirmación enviado a: {st.session_state.supplier_email}")
+                            if actual_cc_emails:
+                                st.success(f"📧 CC enviado a: {', '.join(actual_cc_emails)}")
+                        else:
+                            logger.error("❌ Email sending failed after successful booking save")
+                            st.warning("⚠️ Reserva guardada pero error enviando email")
+                    else:
+                        logger.warning("⚠️ No email address found for confirmation")
+                        st.warning("⚠️ No se encontró email para enviar confirmación")
+                    
+                    st.balloons()
+                    
+                    # Clear session data and log off user
+                    st.session_state.orden_compra_list = ['']
+                    if 'numero_bultos_input' in st.session_state:
+                        del st.session_state.numero_bultos_input
+                    st.info("Cerrando sesión automáticamente...")
+                    st.session_state.authenticated = False
+                    st.session_state.supplier_name = None
+                    st.session_state.supplier_email = None
+                    st.session_state.supplier_cc_emails = []
+                    if 'selected_slot' in st.session_state:
+                        del st.session_state.selected_slot
+                    
+                    logger.info("🔓 User session cleared after successful booking")
+                    
+                    # Wait a moment then rerun
+                    import time
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    logger.error("❌ Booking save failed - no email will be sent")
+                    st.error("❌ Error al guardar reserva - no se envió email de confirmación")
+
 
 
 if __name__ == "__main__":
