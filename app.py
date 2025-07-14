@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layout="wide")
 
-if st.button("🔍 Test Google Sheets Connection"):
-    diagnostic_check_sheets()
+
 
 # ─────────────────────────────────────────────────────────────
 # 1. Configuration
@@ -707,6 +706,9 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 # ─────────────────────────────────────────────────────────────
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
+
+    if st.button("🔍 Test Google Sheets Connection"):
+        diagnostic_check_sheets()
     
     # Download Google Sheets data when app starts
     with st.spinner("Cargando datos..."):
