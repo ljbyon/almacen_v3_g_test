@@ -11,43 +11,36 @@ from email import encoders
 import io
 import os
 from googleapiclient.discovery import build
-import logging
-import time
 
-# Replace with this complete section:
+
+# Add these imports at the top if not already there:
 import logging
 import time
 from datetime import datetime
+import os
 
+# Replace the logging setup with this:
 def setup_file_logging():
-    """Setup logging to save to files in logs folder"""
-    
-    # Create logs directory if it doesn't exist
     if not os.path.exists("logs"):
         os.makedirs("logs")
-        print("📁 Created logs folder")
+        print("📁 Logs folder ready")
     
-    # Create log filename with date and time
     log_filename = f"logs/booking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
-    # Configure logging with both file and console handlers
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            # File handler - saves to file
             logging.FileHandler(log_filename, encoding='utf-8'),
-            # Console handler - shows in terminal
             logging.StreamHandler()
         ]
     )
     
     logger = logging.getLogger(__name__)
-    logger.info(f"📝 Logging started - saving to: {log_filename}")
+    logger.info(f"📝 Logging to: {log_filename}")
     
     return logger
 
-# Use this setup instead of your current logging
 logger = setup_file_logging()
 
 

@@ -1,0 +1,6 @@
+2025-07-14 15:58:58,095 - INFO - 📝 Logging started - saving to: logs/booking_20250714_155858.log
+2025-07-14 15:58:58,095 - INFO - 🧪 Testing logging setup...
+2025-07-14 15:58:58,095 - INFO - 📝 This should appear in both terminal and log file
+2025-07-14 15:58:58,095 - WARNING - ⚠️ This is a warning message
+2025-07-14 15:58:58,095 - ERROR - ❌ This is an error message
+2025-07-14 15:58:58,095 - INFO - ✅ Logging test completed
