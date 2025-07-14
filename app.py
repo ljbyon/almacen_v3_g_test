@@ -12,6 +12,15 @@ import io
 import os
 from googleapiclient.discovery import build
 
+
+
+
+import logging
+from datetime import datetime
+
+# FILE-ONLY LOGGING SETUP
+# ========================
+
 def setup_file_only_logging():
     """File-only logging - no console output"""
     
@@ -40,7 +49,7 @@ def setup_file_only_logging():
     
     return logger, log_file
 
-# Use file-only logging
+# Initialize file-only logging
 logger, log_file_path = setup_file_only_logging()
 
 
@@ -778,6 +787,7 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
 
+
     with st.sidebar:
         st.subheader("📄 Log Viewer")
         
@@ -825,7 +835,7 @@ def main():
     
     # Silent logging on app start
     logger.info("🚀 App started silently")
-
+    
 
 
 
