@@ -14,44 +14,41 @@ from googleapiclient.discovery import build
 import logging
 import time
 
-# Set up logging
-# Replace this in your code:
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-
-# With this:
+# Replace with this complete section:
 import logging
 import time
 from datetime import datetime
-import os
 
-def setup_simple_logging():
-    """Simple logging setup - saves logs in current directory"""
+def setup_file_logging():
+    """Setup logging to save to files in logs folder"""
     
-    # Create logs directory
+    # Create logs directory if it doesn't exist
     if not os.path.exists("logs"):
         os.makedirs("logs")
+        print("📁 Created logs folder")
     
-    # Log filename with timestamp
+    # Create log filename with date and time
     log_filename = f"logs/booking_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
-    # Setup logging
+    # Configure logging with both file and console handlers
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
+            # File handler - saves to file
             logging.FileHandler(log_filename, encoding='utf-8'),
-            logging.StreamHandler()  # Still shows in terminal
+            # Console handler - shows in terminal
+            logging.StreamHandler()
         ]
     )
     
     logger = logging.getLogger(__name__)
-    logger.info(f"📝 Logging started - file: {log_filename}")
+    logger.info(f"📝 Logging started - saving to: {log_filename}")
     
     return logger
 
-# Use this setup
-logger = setup_simple_logging()
+# Use this setup instead of your current logging
+logger = setup_file_logging()
 
 
 
