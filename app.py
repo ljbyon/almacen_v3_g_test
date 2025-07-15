@@ -295,7 +295,7 @@ def save_booking_to_sheets_enhanced(new_booking):
             str(new_booking['Numero_de_bultos']),
             new_booking['Orden_de_compra']
         ]
-         new_row_data = [
+        new_row_data = [
             new_booking['Fecha'],
             new_booking['Hora'],
             new_booking['Proveedor'],
