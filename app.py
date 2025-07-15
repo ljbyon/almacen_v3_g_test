@@ -299,7 +299,7 @@ def save_booking_to_sheets_enhanced(new_booking):
         log_booking_attempt("DATA_PREPARED", f"Row data: {new_row_data}")
 
         # Attempt to save with retry logic
-        max_save_attempts = 3
+        max_save_attempts = 10
         save_success = False
         last_error = None
         
@@ -310,58 +310,23 @@ def save_booking_to_sheets_enhanced(new_booking):
                 # Save to sheets
                 reservas_ws.append_row(new_row_data, value_input_option='RAW')
                 
-                log_booking_attempt("APPEND_SUCCESS", f"append_row() completed for {booking_id}")
+                log_booking_attempt("APPEND_REQUESTED", f"append_row() request sent for {booking_id}")
                 
                 # Wait a moment for Google Sheets to process
                 time.sleep(2)
                 
-                # Step 6A: Check if row count increased
-                log_booking_attempt("ROW_COUNT_CHECK", f"Checking row count increase for {booking_id}")
-                final_row_count = get_sheet_row_count(reservas_ws)
+                # Step 5: Verify the specific booking was saved (CONTENT-ONLY VALIDATION)
+                log_booking_attempt("PROCESSING_WAIT", f"Waiting for Google Sheets to process {booking_id}")
                 
-                if final_row_count == -1:
-                    last_error = "Failed to get final row count"
-                    log_booking_attempt("FINAL_COUNT_FAILED", booking_id, error=last_error)
-                    if attempt < max_save_attempts - 1:
-                        wait_time = (attempt + 1) * 2
-                        log_booking_attempt("COUNT_CHECK_RETRY", f"Waiting {wait_time} seconds before retry")
-                        time.sleep(wait_time)
-                    continue
-                
-                row_count_increased = final_row_count > initial_row_count
-                expected_count = initial_row_count + 1
-                
-                log_booking_attempt("ROW_COUNT_RESULT", 
-                    f"Initial: {initial_row_count}, Final: {final_row_count}, Expected: {expected_count}, Increased: {row_count_increased}")
-                
-                if not row_count_increased:
-                    last_error = f"ROW_COUNT_NO_INCREASE: Row count did not increase. Initial: {initial_row_count}, Final: {final_row_count}"
-                    log_booking_attempt("ROW_COUNT_NO_INCREASE", booking_id, error=last_error)
-                    if attempt < max_save_attempts - 1:
-                        wait_time = (attempt + 1) * 2
-                        log_booking_attempt("ROW_COUNT_RETRY", f"Waiting {wait_time} seconds before retry")
-                        time.sleep(wait_time)
-                    continue
-                
-                if final_row_count != expected_count:
-                    # Row count increased but not by exactly 1 - could indicate multiple saves or other issues
-                    warning_msg = f"Row count increased by {final_row_count - initial_row_count} instead of 1. Possible concurrent saves."
-                    log_booking_attempt("ROW_COUNT_UNEXPECTED", booking_id, error=warning_msg)
-                    # Continue to specific booking verification
-                
-                # Step 6B: Verify the specific booking was saved
-                log_booking_attempt("SPECIFIC_VERIFICATION_START", f"Verifying specific booking for {booking_id}")
                 verification_success, verification_message = verify_booking_saved(spreadsheet, new_booking)
                 
                 if verification_success:
-                    log_booking_attempt("SAVE_VERIFIED", 
-                        f"{booking_id} - Row count: {initial_row_count}→{final_row_count}, {verification_message}", 
-                        success=True)
+                    log_booking_attempt("BOOKING_SAVE_SUCCESS", f"{booking_id} successfully saved and verified", success=True)
                     save_success = True
                     break
                 else:
-                    last_error = f"BOOKING_VERIFICATION_FAILED: Row count increased ({initial_row_count}→{final_row_count}) but specific booking verification failed: {verification_message}"
-                    log_booking_attempt("SAVE_PARTIAL_FAILURE", f"{booking_id}", error=last_error)
+                    last_error = f"BOOKING_VERIFICATION_FAILED: {verification_message}"
+                    log_booking_attempt("BOOKING_VERIFICATION_FAILED", f"{booking_id} save failed - content not found: {verification_message}", success=False)
                     
                     if attempt < max_save_attempts - 1:
                         wait_time = (attempt + 1) * 2
@@ -379,19 +344,16 @@ def save_booking_to_sheets_enhanced(new_booking):
         if save_success:
             # Clear cache after successful save
             download_sheets_to_memory.clear()
-            log_booking_attempt("SAVE_COMPLETE", 
-                f"{booking_id} successfully saved and verified (rows: {initial_row_count}→{final_row_count})", 
-                success=True)
-            return True, f"Booking saved and verified successfully. Row count: {initial_row_count}→{final_row_count}"
+            log_booking_attempt("SAVE_COMPLETE", f"{booking_id} successfully saved and verified", success=True)
+            return True, "Booking saved and verified successfully"
         else:
             # Determine error code based on the type of failure
-            error_code = "2"  # Default to API failure
-            if "ROW_COUNT_NO_INCREASE" in last_error:
-                error_code = "3"  # Row count verification failure
-            elif "BOOKING_VERIFICATION_FAILED" in last_error:
+            if "BOOKING_VERIFICATION_FAILED" in last_error:
                 error_code = "4"  # Booking verification failure
             elif "API_FAILURE" in last_error:
                 error_code = "2"  # API failure
+            else:
+                error_code = "2"  # Default to API failure
             
             error_msg = f"Failed to save after {max_save_attempts} attempts. Last error: {last_error}"
             log_booking_attempt("SAVE_FAILED_FINAL", booking_id, success=False, error=error_msg)
@@ -410,6 +372,7 @@ def save_booking_to_sheets_enhanced(new_booking):
         
         return False, error_msg
 
+        
 def enhanced_confirmation_process(selected_date, selected_slot, numero_bultos, valid_orders, supplier_name, supplier_email, supplier_cc_emails):
     """Enhanced confirmation process with proper error handling and logging"""
     
