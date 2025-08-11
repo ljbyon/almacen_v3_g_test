@@ -308,10 +308,17 @@ def save_booking_to_sheets_enhanced(new_booking):
                 log_booking_attempt("SAVE_ATTEMPT", f"Attempt {attempt + 1}/{max_save_attempts} for {booking_id}")
                 
                 # Save to sheets
-                reservas_ws.append_row(new_row_data, value_input_option='RAW')
+                #reservas_ws.append_row(new_row_data, value_input_option='RAW')
+                #log_booking_attempt("APPEND_REQUESTED", f"append_row() request sent for {booking_id}")
                 
-                log_booking_attempt("APPEND_REQUESTED", f"append_row() request sent for {booking_id}")
-                
+                #new append starts
+                all_values = reservas_ws.get_all_values()
+                next_row = len(all_values) + 1
+                col_range = f'A{next_row}:E{next_row}'
+                reservas_ws.update(col_range, [new_row_data], value_input_option='RAW')
+                log_booking_attempt("APPEND_REQUESTED", f"Updated row {next_row} for {booking_id}")
+                #new append ends
+
                 # Wait a moment for Google Sheets to process
                 time.sleep(5)
                 
