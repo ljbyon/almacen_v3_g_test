@@ -315,7 +315,11 @@ def save_booking_to_sheets_enhanced(new_booking):
                 all_values = reservas_ws.get_all_values()
                 next_row = len(all_values) + 1
                 col_range = f'A{next_row}:E{next_row}'
-                reservas_ws.update(col_range, [new_row_data], value_input_option='RAW')
+                reservas_ws.update(
+                    range_name=col_range,
+                    values=[new_row_data],
+                    value_input_option='RAW'
+                )                
                 log_booking_attempt("APPEND_REQUESTED", f"Updated row {next_row} for {booking_id}")
                 #new append ends
 
