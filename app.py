@@ -383,6 +383,30 @@ def save_booking_to_sheets_enhanced(new_booking):
         
         return False, error_msg
 
+def get_duration_and_slots_info(numero_bultos, selected_slot):
+    """Get duration text and combined slots based on bultos"""
+    if numero_bultos >= 8:
+        # 60 minutes (3 x 20-minute slots)
+        slot1 = selected_slot
+        slot2 = get_next_slot(slot1)
+        slot3 = get_next_slot(slot2)
+        combined_hora = f"{slot1}:00, {slot2}:00, {slot3}:00"
+        duration_text = " (60 minutos)"
+        duration_minutes = 60
+    elif numero_bultos >= 4:
+        # 40 minutes (2 x 20-minute slots)
+        slot1 = selected_slot
+        slot2 = get_next_slot(slot1)
+        combined_hora = f"{slot1}:00, {slot2}:00"
+        duration_text = " (40 minutos)"
+        duration_minutes = 40
+    else:
+        # 20 minutes (single slot)
+        combined_hora = f"{selected_slot}:00"
+        duration_text = " (20 minutos)"
+        duration_minutes = 20
+    
+    return combined_hora, duration_text, duration_minutes
 
 def enhanced_confirmation_process(selected_date, selected_slot, numero_bultos, valid_orders, supplier_name, supplier_email, supplier_cc_emails):
     """Enhanced confirmation process with proper error handling and logging"""
@@ -400,16 +424,10 @@ def enhanced_confirmation_process(selected_date, selected_slot, numero_bultos, v
     
     log_booking_attempt("FINAL_CHECK_PASSED", f"Slot still available for {supplier_name}")
 
-    # Prepare booking data
+    # Prepare booking data - MODIFIED FOR 20-MINUTE SLOTS
     orden_compra_combined = ', '.join(valid_orders)
     
-    if numero_bultos >= 5:
-        next_slot = get_next_slot(selected_slot)
-        combined_hora = f"{selected_slot}:00, {next_slot}:00"
-        duration_text = " (1 hora)"
-    else:
-        combined_hora = f"{selected_slot}:00"
-        duration_text = ""
+    combined_hora, duration_text, _ = get_duration_and_slots_info(numero_bultos, selected_slot)
     
     booking_to_save = {
         'Fecha': selected_date.strftime('%Y-%m-%d') + ' 0:00:00',
@@ -470,7 +488,7 @@ def enhanced_confirmation_process(selected_date, selected_slot, numero_bultos, v
     return True
 
 # ─────────────────────────────────────────────────────────────
-# 3. Email Functions - UNCHANGED
+# 3. Email Functions - MODIFIED FOR 20-MINUTE SLOTS
 # ─────────────────────────────────────────────────────────────
 def download_pdf_attachment():
     """Download PDF attachment from Google Drive"""
@@ -515,7 +533,7 @@ def download_pdf_attachment():
         return None, None
 
 def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails=None):
-    """Send booking confirmation email - UNCHANGED LOGIC"""
+    """Send booking confirmation email - MODIFIED FOR 20-MINUTE SLOTS"""
     try:
         # Use provided CC emails or default
         if cc_emails is None or len(cc_emails) == 0:
@@ -531,28 +549,33 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
         # Format dates for email display
         display_fecha = booking_details['Fecha'].split(' ')[0]  # Remove time part for display
         
-        # Handle combined hora format for 1-hour reservations
+        # Handle combined hora format for reservations - MODIFIED FOR 20-MINUTE SLOTS
         hora_field = booking_details['Hora']
         if ',' in hora_field:
             # Combined slots - show as range
             slots = [slot.strip() for slot in hora_field.split(',')]
             start_time = slots[0].rsplit(':', 1)[0]  # Remove seconds
-            end_time_parts = slots[1].split(':')
-            end_hour = int(end_time_parts[0])
-            end_minute = int(end_time_parts[1])
-            # Add 30 minutes to get actual end time
-            if end_minute == 30:
-                end_hour += 1
-                end_minute = 0
-            else:
-                end_minute = 30
+            last_slot = slots[-1].split(':')
+            end_hour = int(last_slot[0])
+            end_minute = int(last_slot[1])
+            
+            # Add 20 minutes to get actual end time
+            end_minute += 20
+            if end_minute >= 60:
+                end_hour += end_minute // 60
+                end_minute = end_minute % 60
+            
             end_time = f"{end_hour:02d}:{end_minute:02d}"
             display_hora = f"{start_time} - {end_time}"
-            duration_info = " (Duración: 1 hora)"
+            
+            # Determine duration based on number of slots
+            num_slots = len(slots)
+            duration_minutes = num_slots * 20
+            duration_info = f" (Duración: {duration_minutes} minutos)"
         else:
-            # Single slot
+            # Single slot (20 minutes)
             display_hora = hora_field.rsplit(':', 1)[0]  # Remove seconds
-            duration_info = ""
+            duration_info = " (Duración: 20 minutos)"
         
         body = f"""
         Hola {supplier_name},
@@ -628,7 +651,7 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
         return False, []
 
 # ─────────────────────────────────────────────────────────────
-# 4. Time Slot Functions - UNCHANGED LOGIC
+# 4. Time Slot Functions - MODIFIED FOR 20-MINUTE SLOTS
 # ─────────────────────────────────────────────────────────────
 def parse_booked_slots(booked_hours):
     """Parse booked hours that may contain single or combined time slots"""
@@ -679,54 +702,68 @@ def format_time_slot(time_str):
     except (ValueError, AttributeError, TypeError):
         return None
 
-def generate_all_30min_slots():
-    """Generate all possible 30-minute slots - UNCHANGED"""
+def generate_all_20min_slots():
+    """Generate all possible 20-minute slots"""
     weekday_slots = []
     saturday_slots = []
     
     # Weekday slots (9:00-16:00)
     for hour in range(9, 16):
-        for minute in [0, 30]:
+        for minute in [0, 20, 40]:
             start_time = f"{hour:d}:{minute:02d}"
             weekday_slots.append(start_time)
     
     # Saturday slots (9:00-12:00)
     for hour in range(9, 12):
-        for minute in [0, 30]:
+        for minute in [0, 20, 40]:
             start_time = f"{hour:d}:{minute:02d}"
             saturday_slots.append(start_time)
     
     return weekday_slots, saturday_slots
 
 def get_next_slot(slot_time):
-    """Get the next 30-minute slot - UNCHANGED"""
+    """Get the next 20-minute slot"""
     hour, minute = map(int, slot_time.split(':'))
+    
     if minute == 0:
-        next_slot = f"{hour:02d}:30"
-    else:
+        next_slot = f"{hour:d}:20"
+    elif minute == 20:
+        next_slot = f"{hour:d}:40"
+    else:  # minute == 40
         next_hour = hour + 1
         next_slot = f"{next_hour:d}:00"
+    
     return next_slot
 
-def find_contiguous_hour_slots(all_slots, booked_slots):
-    """Find available contiguous 1-hour slots from available 30-minute slots - UNCHANGED"""
-    available_hour_slots = []
+def find_contiguous_slots(all_slots, booked_slots, slots_needed):
+    """Find available contiguous slots based on number of slots needed"""
+    available_slots = []
     
-    for i in range(len(all_slots) - 1):
-        current_slot = all_slots[i]
-        next_slot = get_next_slot(current_slot)
+    for i in range(len(all_slots) - (slots_needed - 1)):
+        # Check if we have enough consecutive slots
+        slots_to_check = []
+        current = all_slots[i]
+        slots_to_check.append(current)
         
-        # Check if this is indeed the next slot in our list
-        if i + 1 < len(all_slots) and all_slots[i + 1] == next_slot:
-            # Both slots are available
-            if current_slot not in booked_slots and next_slot not in booked_slots:
-                available_hour_slots.append(current_slot)
+        # Get the next slots needed
+        for j in range(1, slots_needed):
+            next_expected = get_next_slot(slots_to_check[-1])
+            if i + j < len(all_slots) and all_slots[i + j] == next_expected:
+                slots_to_check.append(all_slots[i + j])
+            else:
+                break
+        
+        # Check if we found all needed consecutive slots
+        if len(slots_to_check) == slots_needed:
+            # Check if all slots are available
+            if all(slot not in booked_slots for slot in slots_to_check):
+                available_slots.append(current)
     
-    return available_hour_slots
+    return available_slots
 
 def get_available_slots(selected_date, reservas_df, numero_bultos):
-    """Get available slots for a date based on bultos count - UPDATED FOR GOOGLE SHEETS"""
-    weekday_slots, saturday_slots = generate_all_30min_slots()
+    """Get available slots for a date based on bultos count"""
+    weekday_slots, saturday_slots = generate_all_20min_slots()
     
     # Sunday = 6, no work
     if selected_date.weekday() == 6:
@@ -734,26 +771,29 @@ def get_available_slots(selected_date, reservas_df, numero_bultos):
     
     # Saturday = 5
     if selected_date.weekday() == 5:
-        all_30min_slots = saturday_slots
+        all_20min_slots = saturday_slots
     else:
-        all_30min_slots = weekday_slots
+        all_20min_slots = weekday_slots
     
-    # Get booked slots for this date - IMPROVED DATE MATCHING FOR GOOGLE SHEETS
+    # Get booked slots for this date
     target_date = selected_date.strftime('%Y-%m-%d')
     
-    # Filter reservations for the selected date (handle different date formats from Google Sheets)
+    # Filter reservations for the selected date
     date_mask = reservas_df['Fecha'].astype(str).str.contains(target_date, na=False)
     booked_hours = reservas_df[date_mask]['Hora'].tolist()
     
     # Parse booked slots (handles combined slots)
     booked_slots = parse_booked_slots(booked_hours)
     
-    if numero_bultos >= 5:
-        # For 5+ bultos, find contiguous 1-hour slots
-        return find_contiguous_hour_slots(all_30min_slots, booked_slots)
+    if numero_bultos >= 8:
+        # For 8+ bultos, find contiguous 60-minute slots (3 x 20 minutes)
+        return find_contiguous_slots(all_20min_slots, booked_slots, 3)
+    elif numero_bultos >= 4:
+        # For 4-7 bultos, find contiguous 40-minute slots (2 x 20 minutes)
+        return find_contiguous_slots(all_20min_slots, booked_slots, 2)
     else:
-        # For 1-4 bultos, return available 30-minute slots
-        return [slot for slot in all_30min_slots if slot not in booked_slots]
+        # For 1-3 bultos, return available 20-minute slots
+        return [slot for slot in all_20min_slots if slot not in booked_slots]
 
 # ─────────────────────────────────────────────────────────────
 # 5. Authentication Function - UPDATED FOR GOOGLE SHEETS
@@ -805,7 +845,7 @@ def authenticate_user(usuario, password):
     return False, "Contraseña incorrecta", None, None
 
 # ─────────────────────────────────────────────────────────────
-# 6. Fresh slot validation function - UPDATED FOR GOOGLE SHEETS
+# 6. Fresh slot validation function - MODIFIED FOR 20-MINUTE SLOTS
 # ─────────────────────────────────────────────────────────────
 def check_slot_availability(selected_date, slot_time, numero_bultos):
     """Check if a specific slot is still available with fresh data from Google Sheets"""
@@ -817,7 +857,7 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
         if fresh_reservas_df is None:
             return False, "Error al verificar disponibilidad"
         
-        # Get booked slots for this date - IMPROVED DATE MATCHING FOR GOOGLE SHEETS
+        # Get booked slots for this date
         target_date = selected_date.strftime('%Y-%m-%d')
         date_mask = fresh_reservas_df['Fecha'].astype(str).str.contains(target_date, na=False)
         booked_hours = fresh_reservas_df[date_mask]['Hora'].tolist()
@@ -825,15 +865,30 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
         # Parse booked slots (handles combined slots)
         booked_slots = parse_booked_slots(booked_hours)
         
-        if numero_bultos >= 5:
-            # For 5+ bultos, check both current and next slot
-            next_slot = get_next_slot(slot_time)
-            if slot_time in booked_slots:
+        if numero_bultos >= 8:
+            # For 8+ bultos, check current and next 2 slots (60 minutes)
+            slot1 = slot_time
+            slot2 = get_next_slot(slot1)
+            slot3 = get_next_slot(slot2)
+            
+            if slot1 in booked_slots:
                 return False, "Otro proveedor acaba de reservar este horario. Por favor, elija otro."
-            if next_slot in booked_slots:
-                return False, "El horario siguiente necesario para su reserva de 1 hora ya está ocupado. Por favor, elija otro."
+            if slot2 in booked_slots:
+                return False, "Uno de los horarios necesarios para su reserva de 60 minutos ya está ocupado."
+            if slot3 in booked_slots:
+                return False, "Uno de los horarios necesarios para su reserva de 60 minutos ya está ocupado."
+                
+        elif numero_bultos >= 4:
+            # For 4-7 bultos, check current and next slot (40 minutes)
+            slot1 = slot_time
+            slot2 = get_next_slot(slot1)
+            
+            if slot1 in booked_slots:
+                return False, "Otro proveedor acaba de reservar este horario. Por favor, elija otro."
+            if slot2 in booked_slots:
+                return False, "El horario siguiente necesario para su reserva de 40 minutos ya está ocupado."
         else:
-            # For 1-4 bultos, check only current slot
+            # For 1-3 bultos, check only current slot (20 minutes)
             if slot_time in booked_slots:
                 return False, "Otro proveedor acaba de reservar este horario. Por favor, elija otro."
         
@@ -843,7 +898,7 @@ def check_slot_availability(selected_date, slot_time, numero_bultos):
         return False, f"Error verificando disponibilidad: {str(e)}"
 
 # ─────────────────────────────────────────────────────────────
-# 7. Main App - UPDATED FOR GOOGLE SHEETS
+# 7. Main App - MODIFIED FOR 20-MINUTE SLOTS
 # ─────────────────────────────────────────────────────────────
 def main():
     st.title("🚚 Dismac: Reserva de Entrega de Mercadería")
@@ -905,7 +960,7 @@ def main():
                 else:
                     st.warning("Complete todos los campos")
     
-    # Main interface after authentication - UNCHANGED LOGIC
+    # Main interface after authentication
     else:
         col1, col2 = st.columns([3, 1])
         with col1:
@@ -926,11 +981,11 @@ def main():
         
         st.markdown("---")
         
-        # STEP 1: Delivery Information - UNCHANGED
+        # STEP 1: Delivery Information - MODIFIED INFO MESSAGE
         st.subheader("📦 Información de Entrega")
         st.markdown('<p style="color: red; font-size: 14px; margin-top: -10px;">Esta aplicación permite programar entregas <strong>exclusivamente de pedidos Marketplace</strong>.<br>Las compras locales o corporativas deben coordinarse directamente con el almacén.</p>', unsafe_allow_html=True)        
-        # Show permanent information about time slot durations
-        st.info("ℹ️ **La duración del horario de reserva dependerá de la cantidad de bultos:** 1-4 bultos = 30 minutos y 5+ bultos = 1 hora")
+        # Show permanent information about time slot durations - MODIFIED FOR 20-MINUTE SLOTS
+        st.info("ℹ️ **La duración del horario de reserva dependerá de la cantidad de bultos:** 1-3 bultos = 20 minutos, 4-7 bultos = 40 minutos y 8+ bultos = 60 minutos")
         
         # Number of bultos (MANDATORY, NO DEFAULT)
         numero_bultos = st.number_input(
@@ -1016,48 +1071,64 @@ def main():
             st.warning("⚠️ No trabajamos los domingos")
             return
         
-        # STEP 3: Time slot selection - UPDATED FOR GOOGLE SHEETS DATA
+        # STEP 3: Time slot selection - MODIFIED FOR 20-MINUTE SLOTS
         st.subheader("🕐 Horarios Disponibles")
         
         # Show any persistent error message
         if st.session_state.slot_error_message:
             st.error(f"❌ {st.session_state.slot_error_message}")
         
-        # Get ALL possible slots and determine availability
-        weekday_slots, saturday_slots = generate_all_30min_slots()
+        # Get ALL possible slots and determine availability - MODIFIED
+        weekday_slots, saturday_slots = generate_all_20min_slots()
         
         if selected_date.weekday() == 5:  # Saturday
-            all_30min_slots = saturday_slots
+            all_20min_slots = saturday_slots
         else:  # Monday-Friday
-            all_30min_slots = weekday_slots
+            all_20min_slots = weekday_slots
         
-        # Get booked slots for this date - UPDATED FOR GOOGLE SHEETS
+        # Get booked slots for this date
         target_date = selected_date.strftime('%Y-%m-%d')
         date_mask = reservas_df['Fecha'].astype(str).str.contains(target_date, na=False)
         booked_hours = reservas_df[date_mask]['Hora'].tolist()
         booked_slots = parse_booked_slots(booked_hours)
         
-        # Generate display slots based on bultos - UNCHANGED LOGIC
-        if numero_bultos >= 5:
-            # For 5+ bultos, show all possible 1-hour slots with availability
+        # Generate display slots based on bultos - MODIFIED FOR 20-MINUTE SLOTS
+        if numero_bultos >= 8:
+            # For 8+ bultos, show all possible 60-minute slots with availability
             display_slots = []
-            for i in range(len(all_30min_slots) - 1):
-                current_slot = all_30min_slots[i]
+            slots_needed = 3
+            for i in range(len(all_20min_slots) - (slots_needed - 1)):
+                current_slot = all_20min_slots[i]
+                slots_to_check = [current_slot]
+                temp_slot = current_slot
+                for j in range(1, slots_needed):
+                    temp_slot = get_next_slot(temp_slot)
+                    if i + j < len(all_20min_slots) and all_20min_slots[i + j] == temp_slot:
+                        slots_to_check.append(temp_slot)
+                    else:
+                        break
+                if len(slots_to_check) == slots_needed:
+                    is_available = all(slot not in booked_slots for slot in slots_to_check)
+                    display_slots.append((current_slot, is_available))
+        elif numero_bultos >= 4:
+            # For 4-7 bultos, show all possible 40-minute slots with availability
+            display_slots = []
+            slots_needed = 2
+            for i in range(len(all_20min_slots) - (slots_needed - 1)):
+                current_slot = all_20min_slots[i]
                 next_slot = get_next_slot(current_slot)
-                
-                # Check if this is indeed the next slot in our list
-                if i + 1 < len(all_30min_slots) and all_30min_slots[i + 1] == next_slot:
+                if i + 1 < len(all_20min_slots) and all_20min_slots[i + 1] == next_slot:
                     is_available = current_slot not in booked_slots and next_slot not in booked_slots
                     display_slots.append((current_slot, is_available))
         else:
-            # For 1-4 bultos, show all 30-minute slots with availability
-            display_slots = [(slot, slot not in booked_slots) for slot in all_30min_slots]
+            # For 1-3 bultos, show all 20-minute slots with availability
+            display_slots = [(slot, slot not in booked_slots) for slot in all_20min_slots]
         
         if not display_slots:
             st.warning("❌ No hay horarios para esta fecha")
             return
         
-        # Display slots (2 per row) - UNCHANGED LOGIC
+        # Display slots (2 per row) - MODIFIED BUTTON TEXT
         selected_slot = None
         
         for i in range(0, len(display_slots), 2):
@@ -1066,11 +1137,13 @@ def main():
             # First slot
             slot1, is_available1 = display_slots[i]
             
-            # Button text based on bultos and availability
-            if numero_bultos >= 5:
-                button_text1 = f"✅ {slot1} (1h)" if is_available1 else f"🚫 {slot1} (Ocupado)"
+            # Button text based on bultos and availability - MODIFIED
+            if numero_bultos >= 8:
+                button_text1 = f"✅ {slot1} (60min)" if is_available1 else f"🚫 {slot1} (Ocupado)"
+            elif numero_bultos >= 4:
+                button_text1 = f"✅ {slot1} (40min)" if is_available1 else f"🚫 {slot1} (Ocupado)"
             else:
-                button_text1 = f"✅ {slot1}" if is_available1 else f"🚫 {slot1} (Ocupado)"
+                button_text1 = f"✅ {slot1} (20min)" if is_available1 else f"🚫 {slot1} (Ocupado)"
             
             with col1:
                 if not is_available1:
@@ -1092,11 +1165,13 @@ def main():
             if i + 1 < len(display_slots):
                 slot2, is_available2 = display_slots[i + 1]
                 
-                # Button text based on bultos and availability
-                if numero_bultos >= 5:
-                    button_text2 = f"✅ {slot2} (1h)" if is_available2 else f"🚫 {slot2} (Ocupado)"
+                # Button text based on bultos and availability - MODIFIED
+                if numero_bultos >= 8:
+                    button_text2 = f"✅ {slot2} (60min)" if is_available2 else f"🚫 {slot2} (Ocupado)"
+                elif numero_bultos >= 4:
+                    button_text2 = f"✅ {slot2} (40min)" if is_available2 else f"🚫 {slot2} (Ocupado)"
                 else:
-                    button_text2 = f"✅ {slot2}" if is_available2 else f"🚫 {slot2} (Ocupado)"
+                    button_text2 = f"✅ {slot2} (20min)" if is_available2 else f"🚫 {slot2} (Ocupado)"
                 
                 with col2:
                     if not is_available2:
@@ -1114,10 +1189,7 @@ def main():
                                 st.session_state.slot_error_message = message
                                 st.rerun()
         
-        # STEP 4: Confirmation - UPDATED FOR GOOGLE SHEETS
-
-
-        # STEP 4: Enhanced Confirmation
+        # STEP 4: Enhanced Confirmation - MODIFIED FOR 20-MINUTE SLOTS
         if selected_slot or 'selected_slot' in st.session_state:
             if selected_slot:
                 st.session_state.selected_slot = selected_slot
@@ -1125,8 +1197,8 @@ def main():
             st.markdown("---")
             st.subheader("✅ Confirmar Reserva")
             
-            # Show summary
-            duration_text = " (1 hora)" if numero_bultos >= 5 else ""
+            # Show summary - MODIFIED
+            _, duration_text, _ = get_duration_and_slots_info(numero_bultos, st.session_state.selected_slot)
             st.info(f"📅 Fecha: {selected_date}")
             st.info(f"🕐 Horario: {st.session_state.selected_slot}{duration_text}")
             st.info(f"📦 Número de bultos: {numero_bultos}")
