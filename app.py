@@ -506,7 +506,7 @@ def _post_mail(to_field, subject, html_body):
     return resp
 
 def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails=None):
-    """Send booking confirmation via Magento mail API (HTML body, single comma-separated 'to')."""
+    """Send booking confirmation via Magento mail API (single comma-separated 'to')."""
     try:
         # --- Build full recipient list (supplier + CCs + defaults), deduped ---
         defaults = ["ljbyon@dismac.com.bo", "marketplace@dismac.com.bo"]
@@ -520,19 +520,23 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
 
         subject = "Confirmación de Reserva para Entrega de Mercadería"
 
-        # --- Time / duration display ---
+        # --- Time / duration display (unchanged from original) ---
         display_fecha = booking_details['Fecha'].split(' ')[0]
         hora_field = booking_details['Hora']
         if ',' in hora_field:
-            slots = [s.strip() for s in hora_field.split(',')]
+            slots = [slot.strip() for slot in hora_field.split(',')]
             start_time = slots[0].rsplit(':', 1)[0]
-            last = slots[-1].split(':')
-            end_hour, end_minute = int(last[0]), int(last[1]) + 20
+            last_slot = slots[-1].split(':')
+            end_hour = int(last_slot[0])
+            end_minute = int(last_slot[1]) + 20
             if end_minute >= 60:
                 end_hour += end_minute // 60
                 end_minute = end_minute % 60
-            display_hora = f"{start_time} - {end_hour:02d}:{end_minute:02d}"
-            duration_info = f" (Duración: {len(slots) * 20} minutos)"
+            end_time = f"{end_hour:02d}:{end_minute:02d}"
+            display_hora = f"{start_time} - {end_time}"
+            num_slots = len(slots)
+            duration_minutes = num_slots * 20
+            duration_info = f" (Duración: {duration_minutes} minutos)"
         else:
             display_hora = hora_field.rsplit(':', 1)[0]
             duration_info = " (Duración: 20 minutos)"
@@ -540,47 +544,46 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
         # --- PDF link ---
         pdf_link = f"https://drive.google.com/file/d/{st.secrets['PDF_FILE_ID']}/view"
 
-        # --- HTML body ---
-        html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#222;">
-<p>Hola {supplier_name},</p>
-<p>Su reserva de entrega ha sido confirmada exitosamente.</p>
+        # --- Original plain-text body, preserved verbatim ---
+        body = f"""
+        Hola {supplier_name},
+        
+        Su reserva de entrega ha sido confirmada exitosamente.
+        
+        DETALLES DE LA RESERVA:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        📅 Fecha: {display_fecha}
+        🕐 Horario: {display_hora}{duration_info}
+        📦 Número de bultos: {booking_details['Numero_de_bultos']}
+        📋 Orden de compra: {booking_details['Orden_de_compra']}
+        
+        INSTRUCCIONES:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        • Respeta el horario reservado para tu entrega.
+        • En caso de retraso, podrías tener que esperar hasta el próximo cupo disponible del día o reprogramar tu entrega.
+        • Dismac no se responsabiliza por los tiempos de espera ocasionados por llegadas fuera de horario.
+        • Además, según el tipo de venta, es importante considerar lo siguiente:
+          - Venta al contado: Debes entregar el pedido junto con la factura a nombre del comprador y tres (3) copias de la orden de compra.
+          - Venta en minicuotas: Debes entregar el pedido junto con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.
+        • Entregar impreso en almacén este correo.
 
-<h3>Detalles de la reserva</h3>
-<ul>
-  <li>📅 <strong>Fecha:</strong> {display_fecha}</li>
-  <li>🕐 <strong>Horario:</strong> {display_hora}{duration_info}</li>
-  <li>📦 <strong>Número de bultos:</strong> {booking_details['Numero_de_bultos']}</li>
-  <li>📋 <strong>Orden de compra:</strong> {booking_details['Orden_de_compra']}</li>
-</ul>
+        REQUISITOS DE SEGURIDAD
+        • Pantalón largo, sin rasgados
+        • Botines de seguridad
+        • Casco de seguridad
+        • Chaleco o camisa con reflectivo
+        • No está permitido manillas, cadenas, y principalmente masticar coca.
 
-<h3>Instrucciones</h3>
-<ul>
-  <li>Respeta el horario reservado para tu entrega.</li>
-  <li>En caso de retraso, podrías tener que esperar hasta el próximo cupo disponible del día o reprogramar tu entrega.</li>
-  <li>Dismac no se responsabiliza por los tiempos de espera ocasionados por llegadas fuera de horario.</li>
-  <li>Según el tipo de venta:
-    <ul>
-      <li><strong>Venta al contado:</strong> entrega el pedido con la factura a nombre del comprador y tres (3) copias de la orden de compra.</li>
-      <li><strong>Venta en minicuotas:</strong> entrega el pedido con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.</li>
-    </ul>
-  </li>
-  <li>Entregar impreso en almacén este correo.</li>
-</ul>
+        📄 Guía del Seller Dismac Marketplace: {pdf_link}
 
-<h3>Requisitos de seguridad</h3>
-<ul>
-  <li>Pantalón largo, sin rasgados</li>
-  <li>Botines de seguridad</li>
-  <li>Casco de seguridad</li>
-  <li>Chaleco o camisa con reflectivo</li>
-  <li>No está permitido manillas, cadenas, y principalmente masticar coca.</li>
-</ul>
+        Gracias por utilizar nuestro sistema de reservas.
+        
+        Saludos cordiales,
+        Equipo de Almacén Dismac
+        """
 
-<p>📄 <a href="{pdf_link}">Descargar la Guía del Seller Dismac Marketplace</a></p>
-
-<p>Gracias por utilizar nuestro sistema de reservas.</p>
-<p>Saludos cordiales,<br>Equipo de Almacén Dismac</p>
-</body></html>"""
+        # Wrap the original text so it renders through the HTML endpoint
+        html_body = f'<html><body><pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">{body}</pre></body></html>'
 
         # --- Single send to everyone ---
         _post_mail(to_field, subject, html_body)
