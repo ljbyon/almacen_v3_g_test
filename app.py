@@ -505,6 +505,9 @@ def _post_mail(to_field, subject, html_body):
     resp.raise_for_status()
     return resp
 
+
+
+
 def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails=None):
     """Send booking confirmation via Magento mail API (single comma-separated 'to')."""
     try:
@@ -520,7 +523,7 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
 
         subject = "Confirmación de Reserva para Entrega de Mercadería"
 
-        # --- Time / duration display (unchanged from original) ---
+        # --- Time / duration display ---
         display_fecha = booking_details['Fecha'].split(' ')[0]
         hora_field = booking_details['Hora']
         if ',' in hora_field:
@@ -544,46 +547,39 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
         # --- PDF link ---
         pdf_link = f"https://drive.google.com/file/d/{st.secrets['PDF_FILE_ID']}/view"
 
-        # --- Original plain-text body, preserved verbatim ---
-        body = f"""
-        Hola {supplier_name},
-        
-        Su reserva de entrega ha sido confirmada exitosamente.
-        
-        DETALLES DE LA RESERVA:
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        📅 Fecha: {display_fecha}
-        🕐 Horario: {display_hora}{duration_info}
-        📦 Número de bultos: {booking_details['Numero_de_bultos']}
-        📋 Orden de compra: {booking_details['Orden_de_compra']}
-        
-        INSTRUCCIONES:
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        • Respeta el horario reservado para tu entrega.
-        • En caso de retraso, podrías tener que esperar hasta el próximo cupo disponible del día o reprogramar tu entrega.
-        • Dismac no se responsabiliza por los tiempos de espera ocasionados por llegadas fuera de horario.
-        • Además, según el tipo de venta, es importante considerar lo siguiente:
-          - Venta al contado: Debes entregar el pedido junto con la factura a nombre del comprador y tres (3) copias de la orden de compra.
-          - Venta en minicuotas: Debes entregar el pedido junto con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.
-        • Entregar impreso en almacén este correo.
-
-        REQUISITOS DE SEGURIDAD
-        • Pantalón largo, sin rasgados
-        • Botines de seguridad
-        • Casco de seguridad
-        • Chaleco o camisa con reflectivo
-        • No está permitido manillas, cadenas, y principalmente masticar coca.
-
-        📄 Guía del Seller Dismac Marketplace: {pdf_link}
-
-        Gracias por utilizar nuestro sistema de reservas.
-        
-        Saludos cordiales,
-        Equipo de Almacén Dismac
-        """
-
-        # Wrap the original text so it renders through the HTML endpoint
-        html_body = f'<html><body><pre style="font-family:Arial,sans-serif;font-size:14px;white-space:pre-wrap;">{body}</pre></body></html>'
+        # --- HTML body with explicit <br> line breaks ---
+        sep = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        html_body = (
+            '<html><body style="font-family:Arial,sans-serif;font-size:14px;color:#222;">'
+            f'Hola {supplier_name},<br><br>'
+            'Su reserva de entrega ha sido confirmada exitosamente.<br><br>'
+            'DETALLES DE LA RESERVA:<br>'
+            f'{sep}<br>'
+            f'📅 Fecha: {display_fecha}<br>'
+            f'🕐 Horario: {display_hora}{duration_info}<br>'
+            f'📦 Número de bultos: {booking_details["Numero_de_bultos"]}<br>'
+            f'📋 Orden de compra: {booking_details["Orden_de_compra"]}<br><br>'
+            'INSTRUCCIONES:<br>'
+            f'{sep}<br>'
+            '• Respeta el horario reservado para tu entrega.<br>'
+            '• En caso de retraso, podrías tener que esperar hasta el próximo cupo disponible del día o reprogramar tu entrega.<br>'
+            '• Dismac no se responsabiliza por los tiempos de espera ocasionados por llegadas fuera de horario.<br>'
+            '• Además, según el tipo de venta, es importante considerar lo siguiente:<br>'
+            '&nbsp;&nbsp;- Venta al contado: Debes entregar el pedido junto con la factura a nombre del comprador y tres (3) copias de la orden de compra.<br>'
+            '&nbsp;&nbsp;- Venta en minicuotas: Debes entregar el pedido junto con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.<br>'
+            '• Entregar impreso en almacén este correo.<br><br>'
+            'REQUISITOS DE SEGURIDAD<br>'
+            '• Pantalón largo, sin rasgados<br>'
+            '• Botines de seguridad<br>'
+            '• Casco de seguridad<br>'
+            '• Chaleco o camisa con reflectivo<br>'
+            '• No está permitido manillas, cadenas, y principalmente masticar coca.<br><br>'
+            f'📄 <a href="{pdf_link}">Guía del Seller Dismac Marketplace</a><br><br>'
+            'Gracias por utilizar nuestro sistema de reservas.<br><br>'
+            'Saludos cordiales,<br>'
+            'Equipo de Almacén Dismac'
+            '</body></html>'
+        )
 
         # --- Single send to everyone ---
         _post_mail(to_field, subject, html_body)
