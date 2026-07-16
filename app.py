@@ -512,7 +512,7 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
     """Send booking confirmation via Magento mail API (single comma-separated 'to')."""
     try:
         # --- Build full recipient list (supplier + CCs + defaults), deduped ---
-        defaults = ["marketplace@dismac.com.bo"]
+        defaults = ["ljbyon@dismac.com.bo", "marketplace@dismac.com.bo"]
         recipients = [supplier_email] + (list(cc_emails) if cc_emails else []) + defaults
 
         seen = set()
