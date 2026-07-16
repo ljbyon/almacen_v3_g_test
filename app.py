@@ -3,14 +3,13 @@ import gspread
 import pandas as pd
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta, time
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
+import requests
 import io
 import os
 from googleapiclient.discovery import build
+
+import time
+import logging
 
 import time
 import logging
@@ -25,12 +24,10 @@ st.set_page_config(page_title="Dismac: Reserva de Entrega de Mercadería", layou
 # 1. Configuration
 # ─────────────────────────────────────────────────────────────
 try:
-    # Email configuration
-    EMAIL_HOST = os.getenv("EMAIL_HOST") or st.secrets["EMAIL_HOST"]
-    EMAIL_PORT = int(os.getenv("EMAIL_PORT") or st.secrets["EMAIL_PORT"])
-    EMAIL_USER = os.getenv("EMAIL_USER") or st.secrets["EMAIL_USER"]
-    EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD") or st.secrets["EMAIL_PASSWORD"]
-    
+    MAIL_API_URL    = os.getenv("MAIL_API_URL")    or st.secrets["MAIL_API_URL"]
+    MAIL_API_TOKEN  = os.getenv("MAIL_API_TOKEN")  or st.secrets["MAIL_API_TOKEN"]
+    MAIL_FROM_EMAIL = os.getenv("MAIL_FROM_EMAIL") or st.secrets.get("MAIL_FROM_EMAIL", "testing@dismac.com.bo")
+    MAIL_FROM_NAME  = os.getenv("MAIL_FROM_NAME")  or st.secrets.get("MAIL_FROM_NAME", "Dismac Marketplace")
 except KeyError as e:
     st.error(f"🔒 Falta configuración: {e}")
     st.stop()
@@ -490,163 +487,107 @@ def enhanced_confirmation_process(selected_date, selected_slot, numero_bultos, v
 # ─────────────────────────────────────────────────────────────
 # 3. Email Functions - MODIFIED FOR 20-MINUTE SLOTS
 # ─────────────────────────────────────────────────────────────
-def download_pdf_attachment():
-    """Download PDF attachment from Google Drive"""
-    try:
-        # Get Google Drive service using same credentials as Sheets
-        gc = setup_google_sheets()
-        if not gc:
-            return None, None
-        
-        # Get the underlying credentials for Drive API
-        credentials_info = dict(st.secrets["google_service_account"])
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.readonly"
-        ]
-        credentials = Credentials.from_service_account_info(credentials_info, scopes=scopes)
-        
-        # Build Drive service
-        from googleapiclient.discovery import build
-        drive_service = build('drive', 'v3', credentials=credentials)
-        
-        # Download the PDF file
-        file_id = st.secrets["PDF_FILE_ID"]
-        
-        # Get file metadata
-        file_metadata = drive_service.files().get(fileId=file_id).execute()
-        filename = file_metadata.get('name', 'GUIA_DEL_SELLER_DISMAC_MARKETPLACE.pdf')
-        
-        # Download file content
-        request = drive_service.files().get_media(fileId=file_id)
-        
-        # Execute download
-        pdf_content = io.BytesIO()
-        downloader = request.execute()
-        pdf_content.write(downloader)
-        pdf_content.seek(0)
-        
-        return pdf_content.getvalue(), filename
-        
-    except Exception as e:
-        st.warning(f"No se pudo descargar el archivo adjunto: {str(e)}")
-        return None, None
+
+
+def _post_mail(to_field, subject, html_body):
+    """Send one request to the Dismac Magento mail endpoint. Raises on non-2xx."""
+    payload = {
+        "from": {"email": MAIL_FROM_EMAIL, "name": MAIL_FROM_NAME},
+        "to": to_field,
+        "subject": subject,
+        "body": html_body,
+    }
+    headers = {
+        "Authorization": f"Bearer {MAIL_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(MAIL_API_URL, json=payload, headers=headers, timeout=30)
+    resp.raise_for_status()
+    return resp
 
 def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails=None):
-    """Send booking confirmation email - MODIFIED FOR 20-MINUTE SLOTS"""
+    """Send booking confirmation via Magento mail API (HTML body, single comma-separated 'to')."""
     try:
-        # Use provided CC emails or default
-        if cc_emails is None or len(cc_emails) == 0:
-            cc_emails = [ "ljbyon@dismac.com.bo", "marketplace@dismac.com.bo", "leonardo.byon@gmail.com"]
-        else:
-            # Add default email to the CC list if not already present
-            if "marketplace@dismac.com.bo" not in cc_emails:
-                cc_emails = cc_emails + [ "ljbyon@dismac.com.bo", "marketplace@dismac.com.bo", "leonardo.byon@gmail.com"]
-        
-        # Email content
+        # --- Build full recipient list (supplier + CCs + defaults), deduped ---
+        defaults = ["ljbyon@dismac.com.bo", "marketplace@dismac.com.bo"]
+        recipients = [supplier_email] + (list(cc_emails) if cc_emails else []) + defaults
+
+        seen = set()
+        recipients = [e for e in recipients
+                      if e and not (e in seen or seen.add(e))]
+
+        to_field = ",".join(recipients)  # no spaces — safest for the Magento handler
+
         subject = "Confirmación de Reserva para Entrega de Mercadería"
-        
-        # Format dates for email display
-        display_fecha = booking_details['Fecha'].split(' ')[0]  # Remove time part for display
-        
-        # Handle combined hora format for reservations - MODIFIED FOR 20-MINUTE SLOTS
+
+        # --- Time / duration display ---
+        display_fecha = booking_details['Fecha'].split(' ')[0]
         hora_field = booking_details['Hora']
         if ',' in hora_field:
-            # Combined slots - show as range
-            slots = [slot.strip() for slot in hora_field.split(',')]
-            start_time = slots[0].rsplit(':', 1)[0]  # Remove seconds
-            last_slot = slots[-1].split(':')
-            end_hour = int(last_slot[0])
-            end_minute = int(last_slot[1])
-            
-            # Add 20 minutes to get actual end time
-            end_minute += 20
+            slots = [s.strip() for s in hora_field.split(',')]
+            start_time = slots[0].rsplit(':', 1)[0]
+            last = slots[-1].split(':')
+            end_hour, end_minute = int(last[0]), int(last[1]) + 20
             if end_minute >= 60:
                 end_hour += end_minute // 60
                 end_minute = end_minute % 60
-            
-            end_time = f"{end_hour:02d}:{end_minute:02d}"
-            display_hora = f"{start_time} - {end_time}"
-            
-            # Determine duration based on number of slots
-            num_slots = len(slots)
-            duration_minutes = num_slots * 20
-            duration_info = f" (Duración: {duration_minutes} minutos)"
+            display_hora = f"{start_time} - {end_hour:02d}:{end_minute:02d}"
+            duration_info = f" (Duración: {len(slots) * 20} minutos)"
         else:
-            # Single slot (20 minutes)
-            display_hora = hora_field.rsplit(':', 1)[0]  # Remove seconds
+            display_hora = hora_field.rsplit(':', 1)[0]
             duration_info = " (Duración: 20 minutos)"
-        
-        body = f"""
-        Hola {supplier_name},
-        
-        Su reserva de entrega ha sido confirmada exitosamente.
-        
-        DETALLES DE LA RESERVA:
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        📅 Fecha: {display_fecha}
-        🕐 Horario: {display_hora}{duration_info}
-        📦 Número de bultos: {booking_details['Numero_de_bultos']}
-        📋 Orden de compra: {booking_details['Orden_de_compra']}
-        
-        INSTRUCCIONES:
-        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        • Respeta el horario reservado para tu entrega.
-        • En caso de retraso, podrías tener que esperar hasta el próximo cupo disponible del día o reprogramar tu entrega.
-        • Dismac no se responsabiliza por los tiempos de espera ocasionados por llegadas fuera de horario.
-        • Además, según el tipo de venta, es importante considerar lo siguiente:
-          - Venta al contado: Debes entregar el pedido junto con la factura a nombre del comprador y tres (3) copias de la orden de compra.
-          - Venta en minicuotas: Debes entregar el pedido junto con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.
-        • Entregar impreso en almacén este correo.
 
-        REQUISITOS DE SEGURIDAD
-        • Pantalón largo, sin rasgados
-        • Botines de seguridad
-        • Casco de seguridad
-        • Chaleco o camisa con reflectivo
-        • No está permitido manillas, cadenas, y principalmente masticar coca.
+        # --- PDF link ---
+        pdf_link = f"https://drive.google.com/file/d/{st.secrets['PDF_FILE_ID']}/view"
 
-        Gracias por utilizar nuestro sistema de reservas.
-        
-        Saludos cordiales,
-        Equipo de Almacén Dismac
-        """
-        
-        # Create message
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = supplier_email
-        msg['Cc'] = ', '.join(cc_emails)
-        msg['Subject'] = subject
-        
-        # Add body
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
-        
-        # Download and attach PDF (optional)
-        pdf_data, pdf_filename = download_pdf_attachment()
-        if pdf_data:
-            attachment = MIMEBase('application', 'octet-stream')
-            attachment.set_payload(pdf_data)
-            encoders.encode_base64(attachment)
-            attachment.add_header(
-                'Content-Disposition',
-                f'attachment; filename= {pdf_filename}'
-            )
-            msg.attach(attachment)
-        
-        # Send email
-        server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
-        server.starttls()
-        server.login(EMAIL_USER, EMAIL_PASSWORD)
-        
-        # Send to supplier + CC recipients
-        all_recipients = [supplier_email] + cc_emails
-        text = msg.as_string()
-        server.sendmail(EMAIL_USER, all_recipients, text)
-        server.quit()
-        
-        return True, cc_emails
-        
+        # --- HTML body ---
+        html_body = f"""<html><body style="font-family:Arial,sans-serif;color:#222;">
+<p>Hola {supplier_name},</p>
+<p>Su reserva de entrega ha sido confirmada exitosamente.</p>
+
+<h3>Detalles de la reserva</h3>
+<ul>
+  <li>📅 <strong>Fecha:</strong> {display_fecha}</li>
+  <li>🕐 <strong>Horario:</strong> {display_hora}{duration_info}</li>
+  <li>📦 <strong>Número de bultos:</strong> {booking_details['Numero_de_bultos']}</li>
+  <li>📋 <strong>Orden de compra:</strong> {booking_details['Orden_de_compra']}</li>
+</ul>
+
+<h3>Instrucciones</h3>
+<ul>
+  <li>Respeta el horario reservado para tu entrega.</li>
+  <li>En caso de retraso, podrías tener que esperar hasta el próximo cupo disponible del día o reprogramar tu entrega.</li>
+  <li>Dismac no se responsabiliza por los tiempos de espera ocasionados por llegadas fuera de horario.</li>
+  <li>Según el tipo de venta:
+    <ul>
+      <li><strong>Venta al contado:</strong> entrega el pedido con la factura a nombre del comprador y tres (3) copias de la orden de compra.</li>
+      <li><strong>Venta en minicuotas:</strong> entrega el pedido con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.</li>
+    </ul>
+  </li>
+  <li>Entregar impreso en almacén este correo.</li>
+</ul>
+
+<h3>Requisitos de seguridad</h3>
+<ul>
+  <li>Pantalón largo, sin rasgados</li>
+  <li>Botines de seguridad</li>
+  <li>Casco de seguridad</li>
+  <li>Chaleco o camisa con reflectivo</li>
+  <li>No está permitido manillas, cadenas, y principalmente masticar coca.</li>
+</ul>
+
+<p>📄 <a href="{pdf_link}">Descargar la Guía del Seller Dismac Marketplace</a></p>
+
+<p>Gracias por utilizar nuestro sistema de reservas.</p>
+<p>Saludos cordiales,<br>Equipo de Almacén Dismac</p>
+</body></html>"""
+
+        # --- Single send to everyone ---
+        _post_mail(to_field, subject, html_body)
+
+        # supplier is first; the rest are reported as CC by the caller
+        return True, recipients[1:]
+
     except Exception as e:
         st.error(f"Error enviando email: {str(e)}")
         return False, []
