@@ -537,11 +537,11 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
     try:
         # Use provided CC emails or default
         if cc_emails is None or len(cc_emails) == 0:
-            cc_emails = [ "ljbyon@dismac.com.bo"]
+            cc_emails = [ "ljbyon@dismac.com.bo", "marketplace@dismac.com.bo", "leonardo.byon@gmail.com"]
         else:
             # Add default email to the CC list if not already present
             if "marketplace@dismac.com.bo" not in cc_emails:
-                cc_emails = cc_emails + [ "ljbyon@dismac.com.bo"]
+                cc_emails = cc_emails + [ "ljbyon@dismac.com.bo", "marketplace@dismac.com.bo", "leonardo.byon@gmail.com"]
         
         # Email content
         subject = "Confirmación de Reserva para Entrega de Mercadería"
@@ -597,7 +597,8 @@ def send_booking_email(supplier_email, supplier_name, booking_details, cc_emails
         • Además, según el tipo de venta, es importante considerar lo siguiente:
           - Venta al contado: Debes entregar el pedido junto con la factura a nombre del comprador y tres (3) copias de la orden de compra.
           - Venta en minicuotas: Debes entregar el pedido junto con la factura a nombre de Dismatec S.A. y una (1) copia de la orden de compra.
-        
+        • Entregar impreso en almacén este correo.
+
         REQUISITOS DE SEGURIDAD
         • Pantalón largo, sin rasgados
         • Botines de seguridad
@@ -708,7 +709,7 @@ def generate_all_20min_slots():
     saturday_slots = []
     
     # Weekday slots (9:00-16:00)
-    for hour in range(9, 17):
+    for hour in range(9, 16):
         for minute in [0, 20, 40]:
             start_time = f"{hour:d}:{minute:02d}"
             weekday_slots.append(start_time)
@@ -774,7 +775,17 @@ def get_available_slots(selected_date, reservas_df, numero_bultos):
         all_20min_slots = saturday_slots
     else:
         all_20min_slots = weekday_slots
+
     
+    
+    
+    # Special case: December 24, 2025 - only allow reservations until 3pm
+    if selected_date.year == 2025 and selected_date.month == 12 and selected_date.day == 24:
+        all_20min_slots = [slot for slot in all_20min_slots if int(slot.split(':')[0]) < 15]
+    
+
+
+
     # Get booked slots for this date
     target_date = selected_date.strftime('%Y-%m-%d')
     
@@ -1085,7 +1096,15 @@ def main():
             all_20min_slots = saturday_slots
         else:  # Monday-Friday
             all_20min_slots = weekday_slots
-        
+
+
+
+        # Special case: December 24, 2025 - only allow reservations until 3pm
+        if selected_date.year == 2025 and selected_date.month == 12 and selected_date.day == 24:
+            all_20min_slots = [slot for slot in all_20min_slots if int(slot.split(':')[0]) < 15]
+
+
+
         # Get booked slots for this date
         target_date = selected_date.strftime('%Y-%m-%d')
         date_mask = reservas_df['Fecha'].astype(str).str.contains(target_date, na=False)
